@@ -96,8 +96,8 @@ function MusicApp() {
     } catch { setMessage("Could not sign out. Please try again."); }
     finally { setAccountBusy(false); }
   };
-  const accountName = account?.user_metadata?.full_name || account?.user_metadata?.name || account?.email || "Your account";
-  const accountControl = accountLoading ? <div className="account-status">Checking account…</div> : account ? <div className="account-controls"><div className="account-identity">{typeof account.user_metadata?.avatar_url === "string" && <img src={account.user_metadata.avatar_url} alt="" referrerPolicy="no-referrer"/>}<span><strong>{accountName}</strong><small>{account.email}</small></span></div><Button variant="outline" onClick={signOut} disabled={accountBusy}>Sign out</Button></div> : <Button variant="outline" onClick={signIn} disabled={accountBusy}>Sign in with Google</Button>;
+  const accountName = account?.user_metadata?.['full_name'] || account?.user_metadata?.['name'] || account?.email || "Your account";
+  const accountControl = accountLoading ? <div className="account-status">Checking account…</div> : account ? <div className="account-controls"><div className="account-identity">{typeof account.user_metadata?.['avatar_url'] === "string" && <img src={account.user_metadata['avatar_url']} alt="" referrerPolicy="no-referrer"/>}<span><strong>{accountName}</strong><small>{account.email}</small></span></div><Button variant="outline" onClick={signOut} disabled={accountBusy}>Sign out</Button></div> : <Button variant="outline" onClick={signIn} disabled={accountBusy}>Sign in with Google</Button>;
   useEffect(() => {
     try {
       const savedPlaylists = JSON.parse(localStorage.getItem("spoiled-playlists") || "[]");

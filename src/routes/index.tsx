@@ -19,7 +19,7 @@ export const Route = createFileRoute("/")({
 
 type View = "home" | "library" | "search" | "liked";
 
-function Art({ t, size = "w-12 h-12", big }: { t?: Track; size?: string; big?: boolean }) {
+function Art({ t, size = "w-12 h-12", big }: { t?: Track | undefined; size?: string; big?: boolean }) {
   const h = t?.hue ?? 30;
   return (
     <div className={`${size} shrink-0 rounded-2xl grid place-items-center font-display text-foreground/70 shadow-[var(--shadow-soft)]`}

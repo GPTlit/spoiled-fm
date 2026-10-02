@@ -13,7 +13,7 @@ type Ctx = {
   crossfade: number;
   shuffle: boolean;
   repeat: boolean;
-  current?: Track;
+  current: Track | undefined;
   addFiles: (files: FileList) => void;
   playTrack: (id: string, list?: string[]) => void;
   toggle: () => void;
@@ -66,9 +66,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const loadOnDeck = useCallback((track: Track, fade: boolean) => {
     const d = decks.current;
     if (!d.length) return;
-    const from = d[active.current];
+    const from = d[active.current]!;
     const toIdx = fade ? 1 - active.current : active.current;
-    const to = d[toIdx];
+    const to = d[toIdx]!;
     to.src = track.url;
     const vol = stateRef.current.volume;
     if (fade && !from.paused) {
@@ -111,7 +111,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const make = () => { const a = new Audio(); a.preload = "auto"; return a; };
     decks.current = [make(), make()];
     const tick = () => {
-      const a = decks.current[active.current];
+      const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
       const { crossfade, index } = stateRef.current;
@@ -151,7 +151,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const toggle = () => {
-    const a = decks.current[active.current];
+    const a = decks.current[active.current]!;
     if (!a?.src) { if (library[0]) playTrack(library[0].id); return; }
     if (a.paused) { void a.play(); setPlaying(true); } else { a.pause(); setPlaying(false); }
   };
@@ -161,13 +161,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       library, queue, index, playing, time, duration, volume, crossfade, shuffle, repeat, current,
       addFiles, playTrack, toggle,
       next: () => goTo(index + 1, crossfade > 0),
-      prev: () => (time > 3 ? (decks.current[active.current].currentTime = 0) : goTo(index - 1)),
-      seek: (t) => { decks.current[active.current].currentTime = t; },
+      prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
+      seek: (t) => { decks.current[active.current]!.currentTime = t; },
       setVolume: (v) => { setVolumeS(v); decks.current.forEach((a) => (a.volume = v)); },
       setCrossfade, setShuffle, setRepeat,
       enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),
       removeFromQueue: (i) => { setQueue((q) => q.filter((_, j) => j !== i)); if (i < index) setIndex(index - 1); },
-      moveInQueue: (from, to) => setQueue((q) => { const c = [...q]; const [x] = c.splice(from, 1); c.splice(to, 0, x); return c; }),
+      moveInQueue: (from, to) => setQueue((q) => { const c = [...q]; const [x] = c.splice(from, 1); if (x) c.splice(to, 0, x); return c; }),
       toggleLike: (id) => setLibrary((l) => l.map((t) => (t.id === id ? { ...t, liked: !t.liked } : t))),
     }}>
       {children}

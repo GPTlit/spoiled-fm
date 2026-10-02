@@ -179,6 +179,17 @@
 .sidebar-nav button,.sidebar-bottom button { justify-content:flex-start; height:48px; border-radius:17px; font-size:14px; gap:13px; }
 .sidebar-nav button.selected { background:var(--foreground); color:var(--background); }
 .sidebar-bottom { margin-top:auto; display:grid; gap:8px; }
+.sidebar-account { border-top:1px solid var(--border); padding-top:12px; margin-top:12px; }
+.sidebar-account > button { width:100%; justify-content:center; }
+.account-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }
+.sidebar-account .account-controls { align-items:stretch; flex-direction:column; }
+.account-identity { display:flex; align-items:center; gap:10px; min-width:0; }
+.account-identity img { width:32px; height:32px; border-radius:50%; object-fit:cover; flex:none; }
+.account-identity span { display:grid; min-width:0; }
+.account-identity strong,.account-identity small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.account-identity strong { font-size:13px; }.account-identity small,.account-status { font-size:11px; color:var(--muted-foreground); }
+.settings-account { display:grid; gap:12px; }.settings-account .settings-row { min-height:32px; }.settings-account > small { font-size:11px; color:var(--muted-foreground); }
+.settings-account > button { justify-self:start; }
 .main-screen { min-width:0; max-width:950px; width:100%; margin:auto; }
 .topline { display:flex; align-items:center; justify-content:space-between; font-weight:800; letter-spacing:2px; font-size:12px; margin-bottom:30px; }
 .home-head { margin:0 0 27px; }.home-head p { font-size:22px; }.home-head h1 { font-size:42px; line-height:1.16; font-weight:750; }.wave-mini { font-size:16px; color:var(--muted-foreground); letter-spacing:2px; }

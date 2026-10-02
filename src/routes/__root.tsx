@@ -79,10 +79,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "SPOILED" },
-      { name: "description", content: "Premium personal music player." },
+      {
+        name: "description",
+        content: "Premium liquid glass personal music player for your local audio collection.",
+      },
+      { property: "og:title", content: "SPOILED" },
+      {
+        property: "og:description",
+        content: "Premium liquid glass personal music player for your local audio collection.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "SPOILED" },
+      {
+        name: "twitter:description",
+        content: "Premium liquid glass personal music player for your local audio collection.",
+      },
     ],
     links: [
       {

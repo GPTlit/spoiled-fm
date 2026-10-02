@@ -3254,3 +3254,155 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* Watch Screen 2-column layout & Related songs list */
+.watch-screen-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .watch-screen-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.watch-main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.watch-sidebar-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.related-songs-card {
+  padding: 20px;
+  border-radius: 24px;
+  background: var(--liquid-glass-card);
+  backdrop-filter: var(--liquid-glass-blur);
+  border: 1px solid var(--liquid-glass-border);
+  box-shadow: var(--liquid-shadow-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.related-songs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--liquid-glass-border-subtle);
+}
+
+.related-songs-header h3 {
+  font-size: 15px;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+}
+
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 680px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.related-track-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: var(--liquid-glass-surface);
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  text-align: left;
+}
+
+.related-track-row:hover {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--liquid-glass-border);
+  transform: translateX(3px);
+}
+
+.dark .related-track-row:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.related-track-row.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #10b981;
+}
+
+.related-thumb-wrap {
+  position: relative;
+  width: 90px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  flex-shrink: 0;
+}
+
+.related-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.related-duration {
+  position: absolute;
+  bottom: 3px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.related-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.related-info strong {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.related-info span {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.related-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}

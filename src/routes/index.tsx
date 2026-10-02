@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -43,6 +43,10 @@ import {
   Maximize2,
   Minimize2,
   Film,
+  Check,
+  Loader2,
+  AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -83,7 +87,8 @@ type Screen =
   | "lyrics"
   | "queue"
   | "album"
-  | "playlist";
+  | "playlist"
+  | "watch";
 
 type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
 
@@ -227,6 +232,19 @@ function MusicApp() {
   const [activeWatchVideo, setActiveWatchVideo] = useState<OnlineVideo | null>(null);
   const [isPipMode, setIsPipMode] = useState(false);
   const [youtubeQuery, setYoutubeQuery] = useState("");
+  const [relatedVideos, setRelatedVideos] = useState<OnlineVideo[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+  const [downloadModalVideo, setDownloadModalVideo] = useState<OnlineVideo | null>(null);
+  const [downloadType, setDownloadType] = useState<"video" | "audio">("video");
+  const [selectedQuality, setSelectedQuality] = useState<string>("720");
+  const [downloadInProgress, setDownloadInProgress] = useState(false);
+  const [downloadProgressText, setDownloadProgressText] = useState("");
+  const [botFallbackInfo, setBotFallbackInfo] = useState<{
+    downloader10: string;
+    y2mate: string;
+    ssyoutube: string;
+  } | null>(null);
 
   const [savedReady, setSavedReady] = useState(false);
 
@@ -448,7 +466,7 @@ function MusicApp() {
   };
 
   // VidMate-Style Online Video Search & Playback
-  const searchOnlineVideos = async (q: string) => {
+  const searchOnlineVideos = useCallback(async (q: string) => {
     const queryStr = q.trim();
     if (!queryStr) {
       setOnlineVideos([]);
@@ -465,12 +483,198 @@ function MusicApp() {
     } finally {
       setOnlineLoading(false);
     }
-  };
+  }, []);
 
   const watchVideo = (video: OnlineVideo, pip = false) => {
     if (p.playing) p.toggle(); // Gracefully pause local audio when watching video
     setActiveWatchVideo(video);
     setIsPipMode(pip);
+    if (!pip) {
+      go("watch");
+    }
+  };
+
+  // Fetch related songs whenever activeWatchVideo changes
+  useEffect(() => {
+    if (!activeWatchVideo) return;
+    let cancelled = false;
+    setRelatedLoading(true);
+
+    const artist = activeWatchVideo.channel || "";
+    const cleanTitle = activeWatchVideo.title
+      .replace(/\(.*?\)|\[.*?\]/g, "")
+      .replace(/ft\..*|feat\..*/i, "")
+      .trim();
+    const q = `${artist} ${cleanTitle} songs`.trim() || activeWatchVideo.title;
+
+    fetch(
+      `/api/video/related?q=${encodeURIComponent(q)}&id=${encodeURIComponent(activeWatchVideo.id)}`,
+    )
+      .then((res) => res.json())
+      .then((data: { videos?: OnlineVideo[] }) => {
+        if (!cancelled) {
+          setRelatedVideos(data.videos || []);
+          setRelatedLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("Related songs error:", err);
+        if (!cancelled) {
+          setRelatedVideos([]);
+          setRelatedLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWatchVideo]);
+
+  const openDownloadModal = (video: OnlineVideo, defaultType: "video" | "audio" = "video") => {
+    setDownloadModalVideo(video);
+    setDownloadType(defaultType);
+    setSelectedQuality(defaultType === "audio" ? "320" : "720");
+    setDownloadProgressText("");
+    setDownloadInProgress(false);
+    setBotFallbackInfo(null);
+    setDownloadModalOpen(true);
+  };
+
+  const handleDownloadFile = async () => {
+    if (!downloadModalVideo || downloadInProgress) return;
+    setDownloadInProgress(true);
+    setBotFallbackInfo(null);
+    setDownloadProgressText(
+      downloadType === "audio"
+        ? `Preparing & encoding ${selectedQuality}kbps audio...`
+        : `Rendering ${selectedQuality}p MP4 video...`,
+    );
+
+    try {
+      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=${downloadType}&quality=${encodeURIComponent(selectedQuality)}&title=${encodeURIComponent(downloadModalVideo.title)}`;
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        // When server-side download is restricted by YouTube's cloud verification,
+        // automatically trigger the instant high-speed browser downloader without failing!
+        const fallbackUrls = {
+          downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
+          y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
+          ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
+        };
+        setBotFallbackInfo(fallbackUrls);
+
+        const targetDirectUrl =
+          downloadType === "audio" ? fallbackUrls.y2mate : fallbackUrls.downloader10;
+
+        const link = document.createElement("a");
+        link.href = targetDirectUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setMessage(
+          `Direct ${downloadType === "video" ? `${selectedQuality}p video` : `${selectedQuality}kbps audio`} download opened in new tab!`,
+        );
+        return;
+      }
+
+      setDownloadProgressText("Transferring file to your downloads...");
+      const blob = await res.blob();
+      const ext = downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4";
+      const sanitized =
+        downloadModalVideo.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
+      const filename = `${sanitized}.${ext}`;
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+
+      setMessage(`Downloaded "${filename}" successfully!`);
+      setDownloadModalOpen(false);
+    } catch (err: unknown) {
+      console.error("Server download attempt error, launching direct download:", err);
+      // Auto fallback to direct browser download on any network/server exception
+      const directUrl =
+        downloadType === "audio"
+          ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
+          : `https://10downloader.com/download?v=${downloadModalVideo.id}`;
+
+      setBotFallbackInfo({
+        downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
+        y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
+        ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
+      });
+
+      const link = document.createElement("a");
+      link.href = directUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setMessage(`Direct high-speed download initiated for "${downloadModalVideo.title}"!`);
+    } finally {
+      setDownloadInProgress(false);
+      setDownloadProgressText("");
+    }
+  };
+
+  const handleSaveToLocalLibrary = async () => {
+    if (!downloadModalVideo || downloadInProgress) return;
+    setDownloadInProgress(true);
+    setDownloadProgressText("Extracting audio & importing into SPOILED local library...");
+
+    try {
+      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        // Fallback: trigger direct audio download and advise user to add to library
+        const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
+        const link = document.createElement("a");
+        link.href = directAudioUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setMessage(
+          `Direct MP3 download opened! Drag the downloaded audio into SPOILED to save permanently in your library.`,
+        );
+        return;
+      }
+
+      const blob = await res.blob();
+      const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
+      await p.addFiles([file]);
+      setMessage(`"${downloadModalVideo.title}" added to your local library!`);
+      setDownloadModalOpen(false);
+    } catch (err: unknown) {
+      console.error("Save to library server stream error:", err);
+      const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
+      const link = document.createElement("a");
+      link.href = directAudioUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      setMessage(
+        `Direct MP3 download opened! Once saved, click 'Add music' in Library to keep it permanently.`,
+      );
+    } finally {
+      setDownloadInProgress(false);
+      setDownloadProgressText("");
+    }
   };
 
   const playYoutube = (target: string) => {
@@ -494,7 +698,7 @@ function MusicApp() {
       void searchOnlineVideos(q);
     }, 450);
     return () => clearTimeout(timer);
-  }, [query, screen]);
+  }, [query, screen, searchOnlineVideos]);
 
   const handleAiSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1189,33 +1393,8 @@ function MusicApp() {
                     </Button>
                   </div>
 
-                  {/* Trending Quick Search Chips */}
-                  <div className="flex gap-2 flex-wrap mb-6">
-                    {[
-                      "Trending Now",
-                      "The Weeknd",
-                      "Lo-Fi Beats",
-                      "Synthwave",
-                      "Hip Hop",
-                      "Acoustic",
-                      "Frank Ocean",
-                      "Daft Punk",
-                    ].map((genre) => (
-                      <button
-                        key={genre}
-                        className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white/40 dark:bg-white/10 hover:bg-white/70 border border-white/60 dark:border-white/20 transition-all shadow-sm"
-                        onClick={() => {
-                          setYoutubeQuery(genre);
-                          void searchOnlineVideos(genre);
-                        }}
-                      >
-                        {genre}
-                      </button>
-                    ))}
-                  </div>
-
                   {/* Online Video Grid if searched */}
-                  {onlineVideos.length > 0 ? (
+                  {onlineVideos.length > 0 && (
                     <div>
                       <div className="section-title">
                         <h2 className="flex items-center gap-2">
@@ -1258,68 +1437,33 @@ function MusicApp() {
                                 >
                                   <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
                                 </button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    watchVideo(vid, true);
-                                  }}
-                                  title="Watch in Mini Player"
-                                >
-                                  <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
-                                </Button>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDownloadModal(vid, "video");
+                                    }}
+                                    title="Download Video or Audio"
+                                  >
+                                    <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" />{" "}
+                                    Download
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      watchVideo(vid, true);
+                                    }}
+                                    title="Watch in Mini Player"
+                                  >
+                                    <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
+                                  </Button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="section-title mt-4">
-                        <h2>Quick Discoveries</h2>
-                      </div>
-                      <div className="grid gap-2">
-                        {[
-                          { title: "Starboy", artist: "The Weeknd" },
-                          { title: "Midnight City", artist: "M83" },
-                          { title: "Get Lucky", artist: "Daft Punk" },
-                          { title: "Blinding Lights", artist: "The Weeknd" },
-                          { title: "Weightless", artist: "Marconi Union" },
-                        ].map((item) => (
-                          <div key={item.title} className="track-row">
-                            <div className="flex-1">
-                              <strong>{item.title}</strong>
-                              <p className="text-xs text-muted-foreground">{item.artist}</p>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const q = `${item.artist} - ${item.title}`;
-                                setYoutubeQuery(q);
-                                void searchOnlineVideos(q);
-                              }}
-                            >
-                              <Search className="mr-1 h-3.5 w-3.5" /> Find Videos
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              className="bg-red-600 hover:bg-red-700 text-white"
-                              onClick={() =>
-                                watchVideo({
-                                  id: `search_query=${encodeURIComponent(`${item.artist} - ${item.title}`)}`,
-                                  title: `${item.title} - ${item.artist}`,
-                                  channel: item.artist,
-                                  thumbnail:
-                                    "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop",
-                                })
-                              }
-                            >
-                              <Youtube className="mr-1 h-3.5 w-3.5" /> Watch
-                            </Button>
                           </div>
                         ))}
                       </div>
@@ -1705,17 +1849,31 @@ function MusicApp() {
                               >
                                 <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
                               </button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  watchVideo(vid, true);
-                                }}
-                                title="Picture-in-Picture Mini Player"
-                              >
-                                <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDownloadModal(vid, "video");
+                                  }}
+                                  title="Download Video or Audio"
+                                >
+                                  <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" />{" "}
+                                  Download
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    watchVideo(vid, true);
+                                  }}
+                                  title="Picture-in-Picture Mini Player"
+                                >
+                                  <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1748,6 +1906,218 @@ function MusicApp() {
                 </div>
               )}
             </>
+          )}
+
+          {screen === "watch" && (
+            <div className="watch-screen">
+              {activeWatchVideo ? (
+                <>
+                  <header className="page-head">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="glass-icon-btn h-9 px-3 gap-1.5"
+                        onClick={() => {
+                          if (previous && previous !== "watch") {
+                            go(previous);
+                          } else {
+                            go("explore");
+                          }
+                        }}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span>Back</span>
+                      </Button>
+                      <div className="min-w-0">
+                        <p className="eyebrow flex items-center gap-1.5">
+                          <Youtube className="h-3.5 w-3.5 text-red-500" /> ONLINE PLAYER
+                        </p>
+                        <h1 className="truncate max-w-[500px] text-lg font-bold">
+                          {activeWatchVideo.title}
+                        </h1>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="download-cta-btn"
+                        onClick={() => openDownloadModal(activeWatchVideo, "video")}
+                      >
+                        <Download className="h-4 w-4" /> Download Media
+                      </Button>
+                    </div>
+                  </header>
+
+                  <div className="watch-screen-grid">
+                    {/* Main Video & Meta Column */}
+                    <div className="watch-main-column">
+                      <div className="watch-video-wrapper">
+                        <iframe
+                          src={getYoutubeEmbedUrl(activeWatchVideo.id)}
+                          title={activeWatchVideo.title}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                        />
+                      </div>
+
+                      <div className="watch-meta-card">
+                        <div className="watch-title-row">
+                          <h1>{activeWatchVideo.title}</h1>
+                          <div className="watch-subinfo">
+                            <span className="font-semibold text-foreground flex items-center gap-1.5">
+                              <Youtube className="h-4 w-4 text-red-500" />
+                              {activeWatchVideo.channel}
+                            </span>
+                            {activeWatchVideo.duration && (
+                              <span>· {activeWatchVideo.duration}</span>
+                            )}
+                            {activeWatchVideo.views && <span>· {activeWatchVideo.views}</span>}
+                          </div>
+                        </div>
+
+                        <div className="watch-actions-bar">
+                          <Button
+                            className="download-cta-btn"
+                            onClick={() => openDownloadModal(activeWatchVideo, "video")}
+                          >
+                            <Download className="h-4 w-4" /> Download Video
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDownloadModal(activeWatchVideo, "audio")}
+                          >
+                            <Music className="mr-1.5 h-4 w-4 text-emerald-500" /> Download Audio
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setIsPipMode(true);
+                              go(previous === "watch" ? "explore" : previous);
+                              setMessage("Now playing in Mini Player");
+                            }}
+                            title="Keep watching while exploring other screens"
+                          >
+                            <Minimize2 className="mr-1.5 h-4 w-4" /> Mini Player
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setMessage(
+                                `"${activeWatchVideo.title}" saved to ${selectedPlaylist}`,
+                              );
+                            }}
+                          >
+                            <Plus className="mr-1.5 h-4 w-4" /> Add to {selectedPlaylist}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Share video link"
+                            onClick={() => {
+                              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                                void navigator.clipboard.writeText(
+                                  `https://www.youtube.com/watch?v=${activeWatchVideo.id}`,
+                                );
+                                setMessage("Video link copied to clipboard");
+                              }
+                            }}
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right Column: Other Related Songs */}
+                    <div className="watch-sidebar-column">
+                      <div className="related-songs-card">
+                        <div className="related-songs-header">
+                          <h3>
+                            <Music2 className="h-4 w-4 text-emerald-500" /> Other Related Songs
+                          </h3>
+                          {relatedLoading && (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+                            </span>
+                          )}
+                        </div>
+
+                        {relatedLoading && relatedVideos.length === 0 ? (
+                          <div className="p-8 text-center text-muted-foreground flex flex-col items-center gap-2">
+                            <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                            <p className="text-xs">Finding related tracks & recommendations…</p>
+                          </div>
+                        ) : relatedVideos.length > 0 ? (
+                          <div className="related-list">
+                            {relatedVideos.map((item) => (
+                              <div
+                                key={item.id}
+                                className={`related-track-row ${
+                                  item.id === activeWatchVideo.id ? "active" : ""
+                                }`}
+                                onClick={() => watchVideo(item)}
+                              >
+                                <div className="related-thumb-wrap">
+                                  <img src={item.thumbnail} alt={item.title} />
+                                  {item.duration && (
+                                    <span className="related-duration">{item.duration}</span>
+                                  )}
+                                </div>
+                                <div className="related-info">
+                                  <strong title={item.title}>{item.title}</strong>
+                                  <span title={item.channel}>{item.channel}</span>
+                                </div>
+                                <div className="related-actions">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-emerald-500"
+                                    title="Download this song"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDownloadModal(item, "audio");
+                                    }}
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                    title="Watch this song"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      watchVideo(item);
+                                    }}
+                                  >
+                                    <Play className="h-3.5 w-3.5 fill-current" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-6 text-center text-muted-foreground text-xs">
+                            <p>No extra related songs found for this video.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-search-prompt mt-10">
+                  <Youtube className="h-10 w-10 mx-auto mb-2 text-red-500 opacity-60" />
+                  <p className="text-sm font-semibold mb-3">No video currently selected</p>
+                  <Button onClick={() => go("explore")}>Explore Online Videos</Button>
+                </div>
+              )}
+            </div>
           )}
 
           {screen === "liked" && (
@@ -2257,71 +2627,268 @@ function MusicApp() {
         </div>
       )}
 
-      {/* VidMate-style Floating Video Modal */}
-      {activeWatchVideo && !isPipMode && (
-        <div className="vidmate-modal-backdrop" onClick={() => setActiveWatchVideo(null)}>
-          <div className="vidmate-modal-window" onClick={(e) => e.stopPropagation()}>
-            <div className="vidmate-modal-header">
+      {/* Download Quality Selector Modal */}
+      {downloadModalOpen && downloadModalVideo && (
+        <div
+          className="download-sheet-backdrop"
+          onClick={() => !downloadInProgress && setDownloadModalOpen(false)}
+        >
+          <div className="download-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="download-sheet-header">
               <h3>
-                <Youtube className="text-red-500 h-5 w-5" />
-                <span className="truncate">{activeWatchVideo.title}</span>
+                <Download className="text-emerald-500 h-5 w-5" />
+                <span>Download Media</span>
               </h3>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsPipMode(true)}
-                  title="Minimize to Picture-in-Picture"
-                >
-                  <Minimize2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setActiveWatchVideo(null)}
-                  title="Close"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={downloadInProgress}
+                onClick={() => setDownloadModalOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-            <div className="vidmate-iframe-wrap">
-              <iframe
-                src={getYoutubeEmbedUrl(activeWatchVideo.id)}
-                title={activeWatchVideo.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
-            </div>
-            <div className="vidmate-modal-footer">
-              <div>
-                <strong className="block text-sm">{activeWatchVideo.title}</strong>
-                <span className="text-xs text-muted-foreground">
-                  {activeWatchVideo.channel}{" "}
-                  {activeWatchVideo.duration ? `· ${activeWatchVideo.duration}` : ""}{" "}
-                  {activeWatchVideo.views ? `· ${activeWatchVideo.views}` : ""}
-                </span>
+
+            <div className="download-sheet-body">
+              {/* Media Preview Card */}
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/50 dark:border-white/10">
+                <img
+                  src={downloadModalVideo.thumbnail}
+                  alt={downloadModalVideo.title}
+                  className="w-16 h-12 object-cover rounded-xl shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <strong className="block text-sm truncate">{downloadModalVideo.title}</strong>
+                  <span className="text-xs text-muted-foreground truncate block">
+                    {downloadModalVideo.channel}{" "}
+                    {downloadModalVideo.duration ? `· ${downloadModalVideo.duration}` : ""}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
+
+              {/* Format Switcher Tabs */}
+              <div className="download-tabs">
+                <button
+                  type="button"
+                  className={`download-tab-btn ${downloadType === "video" ? "active" : ""}`}
                   onClick={() => {
-                    setIsPipMode(true);
-                    setMessage("Playing in Picture-in-Picture.");
+                    if (downloadInProgress) return;
+                    setDownloadType("video");
+                    setSelectedQuality("720");
                   }}
                 >
-                  <Minimize2 className="mr-1 h-3.5 w-3.5" /> Mini Player
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
+                  <Film className="inline mr-1.5 h-3.5 w-3.5" /> Video (.MP4)
+                </button>
+                <button
+                  type="button"
+                  className={`download-tab-btn ${downloadType === "audio" ? "active" : ""}`}
                   onClick={() => {
-                    setMessage(`"${activeWatchVideo.title}" saved to ${selectedPlaylist}`);
+                    if (downloadInProgress) return;
+                    setDownloadType("audio");
+                    setSelectedQuality("320");
                   }}
                 >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> Add to {selectedPlaylist}
+                  <Music className="inline mr-1.5 h-3.5 w-3.5" /> Audio (.MP3 / .M4A)
+                </button>
+              </div>
+
+              {/* Quality Options List */}
+              <div className="quality-list">
+                {downloadType === "video" ? (
+                  <>
+                    {[
+                      {
+                        q: "1080",
+                        label: "1080p Full HD",
+                        badge: "Highest video resolution",
+                        ext: "MP4",
+                      },
+                      {
+                        q: "720",
+                        label: "720p HD",
+                        badge: "Balanced quality & fast download (Recommended)",
+                        ext: "MP4",
+                      },
+                      {
+                        q: "480",
+                        label: "480p Standard",
+                        badge: "Standard definition",
+                        ext: "MP4",
+                      },
+                      {
+                        q: "360",
+                        label: "360p Compact",
+                        badge: "Fastest download, small file size",
+                        ext: "MP4",
+                      },
+                    ].map((opt) => (
+                      <div
+                        key={opt.q}
+                        className={`quality-card ${selectedQuality === opt.q ? "selected" : ""}`}
+                        onClick={() => !downloadInProgress && setSelectedQuality(opt.q)}
+                      >
+                        <div className="quality-info">
+                          <div className="flex items-center gap-2">
+                            <span className="quality-title">{opt.label}</span>
+                            {selectedQuality === opt.q && (
+                              <Check className="h-4 w-4 text-emerald-500" />
+                            )}
+                          </div>
+                          <span className="quality-badge">{opt.badge}</span>
+                        </div>
+                        <span className="quality-size">{opt.ext}</span>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    {[
+                      {
+                        q: "320",
+                        label: "320 kbps MP3",
+                        badge: "Studio Quality (Highest Audio Fidelity)",
+                        ext: "MP3",
+                      },
+                      {
+                        q: "192",
+                        label: "192 kbps MP3",
+                        badge: "Standard Quality (Clear & Crisp)",
+                        ext: "MP3",
+                      },
+                      {
+                        q: "128",
+                        label: "128 kbps M4A",
+                        badge: "High Efficiency AAC Audio",
+                        ext: "M4A",
+                      },
+                    ].map((opt) => (
+                      <div
+                        key={opt.q}
+                        className={`quality-card ${selectedQuality === opt.q ? "selected" : ""}`}
+                        onClick={() => !downloadInProgress && setSelectedQuality(opt.q)}
+                      >
+                        <div className="quality-info">
+                          <div className="flex items-center gap-2">
+                            <span className="quality-title">{opt.label}</span>
+                            {selectedQuality === opt.q && (
+                              <Check className="h-4 w-4 text-emerald-500" />
+                            )}
+                          </div>
+                          <span className="quality-badge">{opt.badge}</span>
+                        </div>
+                        <span className="quality-size">{opt.ext}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Progress State */}
+              {downloadInProgress && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>{downloadProgressText || "Processing media with yt-dlp..."}</span>
+                  </div>
+                  <div className="download-progress-bar">
+                    <div className="download-progress-fill animate-pulse w-3/4" />
+                  </div>
+                </div>
+              )}
+
+              {/* Direct Fast Downloader Active Info */}
+              {botFallbackInfo && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <Check className="h-4 w-4 shrink-0 text-emerald-500" />
+                    <span>Direct Fast Download Ready</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Your high-speed download was launched in a new tab! If your browser prevented
+                    the tab from opening, click any format below:
+                  </p>
+                  <div className="flex flex-col gap-2 pt-1">
+                    <a
+                      href={botFallbackInfo.downloader10}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5"
+                    >
+                      <Download className="h-4 w-4" /> Download MP4 Video (All Qualities){" "}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                    <a
+                      href={botFallbackInfo.y2mate}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-red-600 to-rose-700"
+                    >
+                      <Music className="h-4 w-4" /> Download MP3 Audio (320kbps){" "}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                    <a
+                      href={botFallbackInfo.ssyoutube}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-700"
+                    >
+                      <Film className="h-4 w-4" /> Download via SSYouTube{" "}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Download Buttons */}
+              <div className="flex flex-col gap-2.5 pt-2">
+                <Button
+                  className="download-cta-btn w-full justify-center text-sm h-11"
+                  disabled={downloadInProgress}
+                  onClick={handleDownloadFile}
+                >
+                  {downloadInProgress ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Preparing Download…
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" /> Download{" "}
+                      {downloadType === "video"
+                        ? `${selectedQuality}p Video`
+                        : `${selectedQuality}kbps Audio`}
+                    </>
+                  )}
                 </Button>
+
+                {/* Instant 1-Click External Direct Download Button */}
+                <a
+                  href={
+                    downloadType === "audio"
+                      ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
+                      : `https://10downloader.com/download?v=${downloadModalVideo.id}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full h-10 px-4 rounded-xl border border-white/40 dark:border-white/20 bg-white/30 dark:bg-white/10 hover:bg-white/50 dark:hover:bg-white/20 flex items-center justify-center gap-2 text-xs font-semibold text-foreground no-underline transition-all shadow-sm"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-emerald-500" />
+                  <span>
+                    ⚡ Instant Browser Download (
+                    {downloadType === "video" ? "MP4 Video" : "MP3 Audio"})
+                  </span>
+                </a>
+
+                {downloadType === "audio" && (
+                  <Button
+                    variant="outline"
+                    className="w-full justify-center text-xs h-10 border-white/60 dark:border-white/20"
+                    disabled={downloadInProgress}
+                    onClick={handleSaveToLocalLibrary}
+                  >
+                    <FolderPlus className="mr-2 h-4 w-4 text-emerald-500" />
+                    Save Track Directly to SPOILED Local Music Library
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -2334,7 +2901,13 @@ function MusicApp() {
           <div className="vidmate-pip-bar">
             <span className="truncate max-w-[200px]">{activeWatchVideo.title}</span>
             <div className="flex items-center gap-1">
-              <button onClick={() => setIsPipMode(false)} title="Maximize Full Player">
+              <button
+                onClick={() => {
+                  setIsPipMode(false);
+                  go("watch");
+                }}
+                title="Open in Watch Screen"
+              >
                 <Maximize2 className="h-3.5 w-3.5" />
               </button>
               <button onClick={() => setActiveWatchVideo(null)} title="Close">

@@ -12,3 +12,4 @@
 - Keep SPOILED's local audio files in browser IndexedDB and reconstruct object URLs at startup, because file-backed songs must survive reload without a remote account.
 - Keep the prototype-inspired screens in the existing single TanStack index route with internal screen state, because playback must persist while the listener switches views.
 - Treat editorial artwork as illustrative only and never present it as a playable imported song, because music and recommendations must reflect actual user files.
+- Store Google account profiles in the Cloud profiles table while keeping audio and playlists on the device, because signing in must not silently upload personal music.

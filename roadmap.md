@@ -4,4 +4,4 @@
 - [x] Keep local-file playback and persist imported tracks.
 - [x] Verify import/playback, reload persistence, and mobile/desktop layouts in browser.
 - [ ] External AI, YouTube, and licensed synchronized lyrics require configured services and rights; show honest unavailable states meanwhile.
-- [ ] Add Google sign-in and sign-out buttons; awaiting whether account profile data is needed.
+- [x] Add Google sign-in and sign-out buttons with automatically created account profiles.

@@ -2,6 +2,25 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 export type Track = { id: string; title: string; artist: string; album: string; url: string; duration?: number; liked?: boolean; hue: number };
 
+const DB_NAME = "spoiled-local-music";
+function openLibrary(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("tracks", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function saveTrack(track: Track, file: File) {
+  const db = await openLibrary();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("tracks", "readwrite");
+    tx.objectStore("tracks").put({ ...track, url: undefined, file });
+    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
 type Ctx = {
   library: Track[];
   queue: string[];
@@ -63,6 +82,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const current = library.find((t) => t.id === queue[index]);
 
+  useEffect(() => {
+    let alive = true;
+    openLibrary().then((db) => {
+      const tx = db.transaction("tracks", "readonly");
+      const request = tx.objectStore("tracks").getAll();
+      request.onsuccess = () => {
+        if (alive) setLibrary((previous) => {
+          const existing = new Set(previous.map((t) => t.id));
+          return [...request.result.filter((t: Track) => !existing.has(t.id)).map((t: Track & { file: File }) => ({ ...t, url: URL.createObjectURL(t.file) })), ...previous];
+        });
+        db.close();
+      };
+    }).catch(console.error);
+    return () => { alive = false; };
+  }, []);
+
   const loadOnDeck = useCallback((track: Track, fade: boolean) => {
     const d = decks.current;
     if (!d.length) return;
@@ -99,7 +134,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const goTo = useCallback((i: number, fade = false) => {
     const { queue, library, repeat } = stateRef.current;
     let n = i;
-    if (n >= queue.length) { if (!repeat) { setPlaying(false); return; } n = 0; }
+    if (n >= queue.length) { if (!repeat) { decks.current[active.current]?.pause(); setPlaying(false); return; } n = 0; }
     if (n < 0) n = 0;
     const t = library.find((x) => x.id === queue[n]);
     if (!t) return;
@@ -115,7 +150,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
       const { crossfade, index } = stateRef.current;
-      if (!fading.current && !a.paused && a.duration && crossfade > 0 && a.duration - a.currentTime <= crossfade) {
+      if (!fading.current && !a.paused && a.duration && crossfade > 0 && a.duration - a.currentTime <= crossfade && (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)) {
         goTo(index + 1, true);
       }
     };
@@ -134,12 +169,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [current, goTo]);
 
   const addFiles = (files: FileList) => {
-    const added: Track[] = Array.from(files).filter((f) => f.type.startsWith("audio") || /\.(mp3|flac|wav|m4a|ogg|aac)$/i.test(f.name)).map((f) => {
+    const accepted = Array.from(files).filter((f) => f.type.startsWith("audio") || /\.(mp3|flac|wav|m4a|ogg|aac)$/i.test(f.name));
+    const added: Track[] = accepted.map((f) => {
       const { artist, title } = parseName(f.name);
       const folder = (f as File & { webkitRelativePath?: string }).webkitRelativePath?.split("/").slice(-2, -1)[0];
       return { id: crypto.randomUUID(), title, artist, album: folder || "Singles", url: URL.createObjectURL(f), hue: Math.floor(Math.random() * 60) + 20 };
     });
     setLibrary((l) => [...l, ...added]);
+    added.forEach((track, i) => { void saveTrack(track, accepted[i]!).catch(console.error); });
   };
 
   const playTrack = (id: string, list?: string[]) => {
@@ -168,7 +205,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),
       removeFromQueue: (i) => { setQueue((q) => q.filter((_, j) => j !== i)); if (i < index) setIndex(index - 1); },
       moveInQueue: (from, to) => setQueue((q) => { const c = [...q]; const [x] = c.splice(from, 1); if (x) c.splice(to, 0, x); return c; }),
-      toggleLike: (id) => setLibrary((l) => l.map((t) => (t.id === id ? { ...t, liked: !t.liked } : t))),
+      toggleLike: (id) => setLibrary((l) => l.map((t) => {
+        if (t.id !== id) return t;
+        const updated = { ...t, liked: !t.liked };
+        void openLibrary().then((db) => { const tx = db.transaction("tracks", "readwrite"); const request = tx.objectStore("tracks").get(id); request.onsuccess = () => { if (request.result) tx.objectStore("tracks").put({ ...request.result, liked: updated.liked }); }; tx.oncomplete = () => db.close(); });
+        return updated;
+      })),
     }}>
       {children}
     </PlayerCtx.Provider>

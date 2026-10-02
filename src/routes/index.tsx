@@ -1,172 +1,131 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Heart, Plus, FolderOpen, Search, ListMusic, Library, Home, Volume2, X, ChevronUp, ChevronDown, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, Compass, Disc3, FolderPlus, Heart, Home, Library, ListMusic, Mic, MoreHorizontal, Music2, Pause, Play, Plus, Repeat2, Search, Settings2, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Sparkles, Volume2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PlayerProvider, usePlayer, fmt, type Track } from "@/lib/player";
+import logo from "@/assets/spoiled-logo.png.asset.json";
+import featured from "@/assets/better-days.jpg";
+import afterHours from "@/assets/after-hours.jpg";
+import dawn from "@/assets/dawn-fm.jpg";
+import tranquility from "@/assets/tranquility.jpg";
+import ocean from "@/assets/ocean.jpg";
+import night from "@/assets/night.jpg";
+import sunflower from "@/assets/sunflower.jpg";
+
+type Screen = "home" | "library" | "explore" | "ai" | "settings" | "search" | "liked" | "now" | "lyrics" | "queue" | "album" | "playlist";
+type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
+const covers = [afterHours, dawn, tranquility, ocean, night, sunflower];
+const coverFor = (name: string) => covers[Math.abs([...name].reduce((n, c) => n + c.charCodeAt(0), 0)) % covers.length];
+const nav: { screen: Screen; label: string; icon: typeof Home }[] = [{ screen: "home", label: "Home", icon: Home }, { screen: "library", label: "Library", icon: Library }, { screen: "explore", label: "Explore", icon: Compass }, { screen: "ai", label: "AI", icon: Sparkles }];
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "SPOILED — Your personal music, beautifully played" },
-      { name: "description", content: "A premium liquid-glass music player for your own library, with seamless crossfades and a powerful queue." },
-      { property: "og:title", content: "SPOILED — Your personal music, beautifully played" },
-      { property: "og:description", content: "Premium local music player with seamless transitions." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: () => (<PlayerProvider><App /></PlayerProvider>),
+  head: () => ({ meta: [
+    { title: "SPOILED — Your music, your world" },
+    { name: "description", content: "SPOILED is a personal music player for your own local music collection." },
+    { property: "og:title", content: "SPOILED — Your music, your world" },
+    { property: "og:description", content: "A personal music player for your own local music collection." },
+    { property: "og:type", content: "website" },
+    { name: "twitter:card", content: "summary_large_image" },
+  ] }),
+  component: () => <PlayerProvider><MusicApp /></PlayerProvider>,
 });
 
-type View = "home" | "library" | "search" | "liked";
-
-function Art({ t, size = "w-12 h-12", big }: { t?: Track | undefined; size?: string; big?: boolean }) {
-  const h = t?.hue ?? 30;
-  return (
-    <div className={`${size} shrink-0 rounded-2xl grid place-items-center font-display text-foreground/70 shadow-[var(--shadow-soft)]`}
-      style={{ background: `radial-gradient(circle at 30% 25%, oklch(0.97 0.03 ${h}), oklch(0.82 0.06 ${h + 20}) 60%, oklch(0.4 0.03 ${h}))` }}>
-      <span className={big ? "text-7xl" : "text-lg"}>{t?.title?.[0] ?? "S"}</span>
-    </div>
-  );
+function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
+  return <div className={`art ${className}`}><img src={track ? coverFor(track.album) : logo.url} alt={track ? `${track.album} artwork illustration` : "SPOILED"} /></div>;
 }
 
-function App() {
+function MusicApp() {
   const p = usePlayer();
-  const [view, setView] = useState<View>("home");
-  const [q, setQ] = useState("");
-  const [showQueue, setShowQueue] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const dirRef = useRef<HTMLInputElement>(null);
-
+  const [screen, setScreen] = useState<Screen>("home");
+  const [tab, setTab] = useState<Tab>("Songs");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("Recently Added");
+  const [selectedAlbum, setSelectedAlbum] = useState("");
+  const [playlistName, setPlaylistName] = useState("");
+  const [playlists, setPlaylists] = useState<{ name: string; ids: string[] }[]>([]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState("");
+  const [menu, setMenu] = useState<string | null>(null);
+  const [theme, setTheme] = useState("Cream");
+  const [message, setMessage] = useState("");
+  const files = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
+  const [previous, setPrevious] = useState<Screen>("home");
+  const [lyrics, setLyrics] = useState<Record<string, string>>({});
+  const [lyricDraft, setLyricDraft] = useState("");
+  const [aiText, setAiText] = useState("");
+  const [aiReply, setAiReply] = useState("");
+  const [savedReady, setSavedReady] = useState(false);
+  useEffect(() => {
+    try {
+      const savedPlaylists = JSON.parse(localStorage.getItem("spoiled-playlists") || "[]");
+      const savedLyrics = JSON.parse(localStorage.getItem("spoiled-lyrics") || "{}");
+      if (Array.isArray(savedPlaylists)) setPlaylists(savedPlaylists);
+      if (savedLyrics && typeof savedLyrics === "object" && !Array.isArray(savedLyrics)) setLyrics(savedLyrics);
+    } catch { /* Ignore invalid previous browser data. */ }
+    setSavedReady(true);
+  }, []);
+  useEffect(() => { if (savedReady) localStorage.setItem("spoiled-playlists", JSON.stringify(playlists)); }, [playlists, savedReady]);
+  useEffect(() => { if (savedReady) localStorage.setItem("spoiled-lyrics", JSON.stringify(lyrics)); }, [lyrics, savedReady]);
+  const go = (next: Screen) => { setPrevious(screen); setScreen(next); setMenu(null); };
+  const back = () => { setScreen(previous === screen ? "home" : previous); setMenu(null); };
   const list = useMemo(() => {
-    let l = p.library;
-    if (view === "liked") l = l.filter((t) => t.liked);
-    if (view === "search" && q) { const s = q.toLowerCase(); l = l.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(s)); }
-    return l;
-  }, [p.library, view, q]);
-
-  const nav: [View, string, typeof Home][] = [["home", "Home", Home], ["library", "Library", Library], ["search", "Search", Search], ["liked", "Loved", Heart]];
-
-  return (
-    <div className="min-h-screen bg-ambient text-foreground pb-40">
-      <input ref={fileRef} type="file" accept="audio/*" multiple hidden onChange={(e) => e.target.files && p.addFiles(e.target.files)} />
-      <input ref={dirRef} type="file" multiple hidden {...({ webkitdirectory: "" } as object)} onChange={(e) => e.target.files && p.addFiles(e.target.files)} />
-
-      <div className="mx-auto max-w-7xl grid md:grid-cols-[220px_1fr] gap-6 p-4 md:p-6">
-        <aside className="glass rounded-[2rem] p-5 md:sticky md:top-6 h-fit">
-          <h1 className="font-display text-4xl tracking-tight">Spoiled</h1>
-          <p className="text-xs text-muted-foreground mt-1">your music, indulged.</p>
-          <nav className="mt-6 flex md:flex-col gap-1 overflow-x-auto">
-            {nav.map(([v, label, Icon]) => (
-              <button key={v} onClick={() => setView(v)} className={`flex items-center gap-3 rounded-2xl px-3 py-2 text-sm transition ${view === v ? "bg-foreground text-background" : "hover:bg-foreground/5"}`}>
-                <Icon className="h-4 w-4" />{label}
-              </button>
-            ))}
-          </nav>
-          <div className="mt-6 hidden md:block space-y-2">
-            <button onClick={() => fileRef.current?.click()} className="w-full flex items-center gap-2 rounded-2xl border border-border px-3 py-2 text-sm hover:bg-foreground/5"><Plus className="h-4 w-4" />Add songs</button>
-            <button onClick={() => dirRef.current?.click()} className="w-full flex items-center gap-2 rounded-2xl border border-border px-3 py-2 text-sm hover:bg-foreground/5"><FolderOpen className="h-4 w-4" />Add folder</button>
-          </div>
-          <div className="mt-6 hidden md:block">
-            <label className="text-xs text-muted-foreground">Crossfade · {p.crossfade}s</label>
-            <input type="range" min={0} max={12} value={p.crossfade} onChange={(e) => p.setCrossfade(+e.target.value)} className="w-full accent-foreground" />
-          </div>
-        </aside>
-
-        <main className="space-y-6 min-w-0">
-          {view === "home" && (
-            <section className="glass rounded-[2.5rem] p-8 md:p-12 grid md:grid-cols-[1fr_auto] gap-8 items-center">
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">{p.current ? "Now playing" : "Welcome"}</p>
-                <h2 className="font-display text-5xl md:text-7xl leading-[0.95] mt-3">{p.current?.title ?? "A music room built around you."}</h2>
-                <p className="mt-4 text-muted-foreground">{p.current ? `${p.current.artist} — ${p.current.album}` : "Bring your own files. Everything plays locally, privately, with seamless transitions."}</p>
-                {!p.library.length && (
-                  <div className="mt-8 flex flex-wrap gap-3">
-                    <button onClick={() => dirRef.current?.click()} className="rounded-full bg-foreground text-background px-6 py-3 text-sm">Import a music folder</button>
-                    <button onClick={() => fileRef.current?.click()} className="rounded-full border border-border px-6 py-3 text-sm">Choose files</button>
-                  </div>
-                )}
-              </div>
-              <Art t={p.current} size="w-48 h-48 md:w-64 md:h-64" big />
-            </section>
-          )}
-
-          {view === "search" && (
-            <div className="glass rounded-full flex items-center gap-3 px-5 py-3">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Songs, artists, albums…" className="bg-transparent outline-none flex-1" />
-            </div>
-          )}
-
-          <section className="glass rounded-[2rem] p-3">
-            <div className="flex items-center justify-between px-4 py-3">
-              <h3 className="font-display text-2xl">{view === "liked" ? "Loved" : view === "search" ? "Results" : "Your library"}</h3>
-              <span className="text-xs text-muted-foreground">{list.length} songs</span>
-            </div>
-            {list.length === 0 ? (
-              <p className="px-4 py-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Sparkles className="h-4 w-4" />{p.library.length ? "Nothing here yet." : "Import music to begin. Name files “Artist - Title” for best results."}</p>
-            ) : list.map((t, i) => {
-              const isCur = p.current?.id === t.id;
-              return (
-                <div key={t.id} onDoubleClick={() => p.playTrack(t.id, list.map((x) => x.id))} className={`group grid grid-cols-[2rem_auto_1fr_auto] md:grid-cols-[2rem_auto_1fr_1fr_auto] items-center gap-4 rounded-2xl px-4 py-2 hover:bg-foreground/5 ${isCur ? "bg-foreground/5" : ""}`}>
-                  <button onClick={() => p.playTrack(t.id, list.map((x) => x.id))} className="text-xs text-muted-foreground">
-                    {isCur && p.playing ? <Pause className="h-4 w-4 text-foreground" /> : <span className="group-hover:hidden">{i + 1}</span>}
-                    {!(isCur && p.playing) && <Play className="h-4 w-4 hidden group-hover:block text-foreground" />}
-                  </button>
-                  <Art t={t} size="w-10 h-10" />
-                  <div className="min-w-0"><p className="truncate text-sm font-medium">{t.title}</p><p className="truncate text-xs text-muted-foreground">{t.artist}</p></div>
-                  <p className="hidden md:block truncate text-xs text-muted-foreground">{t.album}</p>
-                  <div className="flex gap-1">
-                    <button onClick={() => p.enqueue(t.id)} title="Play next" className="p-2 rounded-full hover:bg-foreground/10 opacity-0 group-hover:opacity-100"><ListMusic className="h-4 w-4" /></button>
-                    <button onClick={() => p.toggleLike(t.id)} className="p-2 rounded-full hover:bg-foreground/10"><Heart className={`h-4 w-4 ${t.liked ? "fill-foreground" : "text-muted-foreground"}`} /></button>
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-        </main>
-      </div>
-
-      {showQueue && (
-        <div className="fixed right-4 bottom-32 w-[min(380px,calc(100vw-2rem))] max-h-[60vh] overflow-auto glass-strong rounded-[2rem] p-4 z-40 animate-scale-in">
-          <div className="flex justify-between items-center mb-2 px-2"><h4 className="font-display text-xl">Up next</h4><button onClick={() => setShowQueue(false)}><X className="h-4 w-4" /></button></div>
-          {p.queue.map((id, i) => {
-            const t = p.library.find((x) => x.id === id); if (!t) return null;
-            return (
-              <div key={id + i} className={`flex items-center gap-3 rounded-2xl px-2 py-1.5 ${i === p.index ? "bg-foreground/5" : ""} ${i < p.index ? "opacity-40" : ""}`}>
-                <Art t={t} size="w-8 h-8" />
-                <div className="min-w-0 flex-1"><p className="truncate text-sm">{t.title}</p><p className="truncate text-xs text-muted-foreground">{t.artist}</p></div>
-                <button onClick={() => i > 0 && p.moveInQueue(i, i - 1)}><ChevronUp className="h-4 w-4" /></button>
-                <button onClick={() => i < p.queue.length - 1 && p.moveInQueue(i, i + 1)}><ChevronDown className="h-4 w-4" /></button>
-                {i !== p.index && <button onClick={() => p.removeFromQueue(i)}><X className="h-4 w-4" /></button>}
-              </div>
-            );
-          })}
-          {!p.queue.length && <p className="text-sm text-muted-foreground p-2">Queue is empty.</p>}
-        </div>
-      )}
-
-      <footer className="fixed bottom-4 inset-x-4 z-30 glass-strong rounded-[2rem] px-4 py-3 grid grid-cols-[1fr_auto] md:grid-cols-[1fr_2fr_1fr] items-center gap-4">
-        <div className="flex items-center gap-3 min-w-0"><Art t={p.current} /><div className="min-w-0"><p className="truncate text-sm font-medium">{p.current?.title ?? "Nothing playing"}</p><p className="truncate text-xs text-muted-foreground">{p.current?.artist ?? "Spoiled"}</p></div></div>
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center gap-4">
-            <button onClick={() => p.setShuffle(!p.shuffle)} className={`hidden md:block ${p.shuffle ? "" : "text-muted-foreground"}`}><Shuffle className="h-4 w-4" /></button>
-            <button onClick={p.prev}><SkipBack className="h-5 w-5" /></button>
-            <button onClick={p.toggle} className="h-11 w-11 grid place-items-center rounded-full bg-foreground text-background hover:scale-105 transition">{p.playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}</button>
-            <button onClick={p.next}><SkipForward className="h-5 w-5" /></button>
-            <button onClick={() => p.setRepeat(!p.repeat)} className={`hidden md:block ${p.repeat ? "" : "text-muted-foreground"}`}><Repeat className="h-4 w-4" /></button>
-          </div>
-          <div className="hidden md:flex items-center gap-2 w-full text-[11px] text-muted-foreground tabular-nums">
-            <span>{fmt(p.time)}</span>
-            <input type="range" min={0} max={p.duration || 1} step={0.1} value={p.time} onChange={(e) => p.seek(+e.target.value)} className="flex-1 accent-foreground" />
-            <span>{fmt(p.duration)}</span>
-          </div>
-        </div>
-        <div className="hidden md:flex items-center justify-end gap-3">
-          <button onClick={() => setShowQueue(!showQueue)} className={showQueue ? "" : "text-muted-foreground"}><ListMusic className="h-4 w-4" /></button>
-          <Volume2 className="h-4 w-4 text-muted-foreground" />
-          <input type="range" min={0} max={1} step={0.01} value={p.volume} onChange={(e) => p.setVolume(+e.target.value)} className="w-24 accent-foreground" />
-        </div>
-      </footer>
+    let tracks = [...p.library];
+    if (screen === "liked") tracks = tracks.filter(t => t.liked);
+    if (screen === "search" && query.trim()) tracks = tracks.filter(t => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(query.toLowerCase()));
+    if (screen === "album") tracks = tracks.filter(t => t.album === selectedAlbum);
+    if (screen === "playlist") tracks = tracks.filter(t => playlists.find(x => x.name === selectedPlaylist)?.ids.includes(t.id));
+    if (sort === "Title A–Z") tracks.sort((a,b) => a.title.localeCompare(b.title));
+    if (sort === "Artist A–Z") tracks.sort((a,b) => a.artist.localeCompare(b.artist));
+    return tracks;
+  }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort]);
+  const albums = useMemo(() => [...new Set(p.library.map(t => t.album))], [p.library]);
+  const artists = useMemo(() => [...new Set(p.library.map(t => t.artist))], [p.library]);
+  const playList = (tracks: Track[], shuffle = false) => { if (!tracks.length) return; const ids = tracks.map(t => t.id); if (shuffle) ids.sort(() => Math.random() - .5); const first = ids[0]; if (first) p.playTrack(first, ids); };
+  const addPlaylist = () => { const name = playlistName.trim(); if (name && !playlists.some(x => x.name === name)) { setPlaylists(v => [...v, { name, ids: [] }]); setPlaylistName(""); setMessage(`Created ${name}`); } };
+  const addToPlaylist = (id: string, name: string) => { setPlaylists(v => v.map(x => x.name === name ? { ...x, ids: [...new Set([...x.ids, id])] } : x)); setMenu(null); setMessage(`Added to ${name}`); };
+  const rows = (tracks: Track[]) => tracks.length ? <div className="track-list">{tracks.map((t, i) => <div key={t.id} className="track-row">
+    <Button variant="ghost" className="track-main" onClick={() => p.playTrack(t.id, tracks.map(x => x.id))} title={`Play ${t.title}`}><Art track={t} className="track-art"/><span className="track-copy"><strong>{t.title}</strong><small>{t.artist}</small></span></Button>
+    <span className="track-duration">{t.duration ? fmt(t.duration) : ""}</span>
+    <Button variant="ghost" size="icon" title={`Options for ${t.title}`} onClick={() => setMenu(menu === t.id ? null : t.id)}><MoreHorizontal/></Button>
+    {menu === t.id && <div className="row-menu">
+      <Button variant="ghost" onClick={() => { p.playTrack(t.id, tracks.map(x => x.id)); setMenu(null); }}>Play</Button>
+      <Button variant="ghost" onClick={() => { p.enqueue(t.id); setMenu(null); setMessage("Added to play next"); }}>Play next</Button>
+      <Button variant="ghost" onClick={() => { p.enqueue(t.id); setMenu(null); setMessage("Added to queue"); }}>Add to queue</Button>
+      <Button variant="ghost" onClick={() => { p.toggleLike(t.id); setMenu(null); }}>{t.liked ? "Remove from loved" : "Love song"}</Button>
+      {playlists.map(x => <Button key={x.name} variant="ghost" onClick={() => addToPlaylist(t.id, x.name)}>Add to {x.name}</Button>)}
+      <Button variant="ghost" onClick={() => { setSelectedAlbum(t.album); go("album"); }}>Go to album</Button>
+    </div>}
+  </div>)}</div> : <Empty onAdd={() => files.current?.click()} label={screen === "liked" ? "No loved songs yet" : screen === "search" ? "No songs found" : "Your music belongs here"} />;
+  const albumGrid = (names: string[]) => names.length ? <div className="album-grid">{names.map(name => <Button key={name} variant="ghost" className="album-tile" onClick={() => { setSelectedAlbum(name); go("album"); }}><img src={coverFor(name)} alt=""/><strong>{name}</strong><small>{p.library.find(t => t.album === name)?.artist} · {p.library.filter(t => t.album === name).length} songs</small></Button>)}</div> : <Empty onAdd={() => folder.current?.click()} label="No albums yet" />;
+  const activeNav = (["now", "lyrics", "queue", "album", "playlist", "liked", "search", "settings"] as Screen[]).includes(screen) ? previous : screen;
+  return <div className={`app-shell ${theme === "Dark" ? "dark" : ""}`}>
+    <input ref={files} type="file" accept="audio/*,.flac" multiple hidden onChange={e => { if (e.target.files?.length) { p.addFiles(e.target.files); setMessage(`${e.target.files.length} file${e.target.files.length === 1 ? "" : "s"} added`); e.target.value = ""; } }} />
+    <input ref={folder} type="file" multiple hidden {...({ webkitdirectory: "" } as object)} onChange={e => { if (e.target.files?.length) { p.addFiles(e.target.files); setMessage(`${e.target.files.length} files selected`); e.target.value = ""; } }} />
+    <div className="app-layout">
+      <aside className="desktop-sidebar"><img src={logo.url} alt="SPOILED" className="brand-logo"/><p className="sidebar-heading">YOUR MUSIC, YOUR WORLD</p><div className="sidebar-nav">{nav.map(({screen: s,label,icon:Icon}) => <Button key={s} variant="ghost" className={activeNav === s ? "selected" : ""} onClick={() => go(s)}><Icon/>{label}</Button>)}<Button variant="ghost" onClick={() => go("search")}><Search/>Search</Button><Button variant="ghost" onClick={() => go("liked")}><Heart/>Loved songs</Button></div><div className="sidebar-bottom"><Button variant="ghost" onClick={() => go("settings")}><Settings2/>Settings</Button><Button variant="outline" onClick={() => files.current?.click()}><Plus/>Add music</Button></div></aside>
+      <main className="main-screen">
+        {screen === "home" && <><div className="topline"><span>SPOILED</span><Button variant="ghost" size="icon" title="Settings" onClick={() => go("settings")}><Settings2/></Button></div><header className="home-head"><p>Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"},</p><h1>your music <span className="wave-mini">▮▮▮</span></h1></header><Button variant="ghost" className="search-pill" onClick={() => go("search")}><Search/>Search your music…<Mic className="search-mic"/></Button>
+          <div className="feature" style={{ backgroundImage: `linear-gradient(0deg, var(--feature-shade), transparent 65%), url(${featured})` }}><div><h2>Better Days</h2><p>A little space to discover.</p></div><Button variant="secondary" size="icon" title="Explore music" onClick={() => go("explore")}><Compass/></Button></div>
+          <div className="quick-grid"><Button variant="ghost" onClick={() => go("liked")}><Heart/><strong>Loved Songs</strong><small>{p.library.filter(t => t.liked).length} songs</small></Button><Button variant="ghost" onClick={() => {setTab("Playlists"); go("library");}}><Music2/><strong>Playlists</strong><small>{playlists.length} playlists</small></Button><Button variant="ghost" onClick={() => {setTab("Artists"); go("library");}}><Disc3/><strong>Artists</strong><small>{artists.length} artists</small></Button></div>
+          <div className="section-title"><h2>Recently added</h2><Button variant="ghost" onClick={() => go("library")}>See all <ChevronRight/></Button></div>{p.library.length ? <div className="recent-grid">{p.library.slice(-4).reverse().map(t => <Button variant="ghost" className="recent-tile" key={t.id} onClick={() => p.playTrack(t.id)}><Art track={t}/><strong>{t.title}</strong><small>{t.artist}</small></Button>)}</div> : <div className="home-empty"><p>Your collection starts with a song.</p><Button onClick={() => files.current?.click()}><Plus/>Add music</Button><Button variant="outline" onClick={() => folder.current?.click()}><FolderPlus/>Import folder</Button></div>}
+        </>}
+        {(screen === "library" || screen === "liked" || screen === "search") && <><header className="page-head"><div><p className="eyebrow">YOUR COLLECTION</p><h1>{screen === "liked" ? "Loved Songs" : screen === "search" ? "Search" : "Library"}</h1></div><Button variant="outline" size="icon" title="Add music" onClick={() => files.current?.click()}><Plus/></Button></header>{screen === "search" ? <div className="search-pill field"><Search/><input autoFocus placeholder="Songs, artists, albums…" value={query} onChange={e => setQuery(e.target.value)}/>{query && <Button variant="ghost" size="icon" onClick={() => setQuery("")} title="Clear search"><X/></Button>}</div> : screen === "library" && <><div className="segmented">{(["Songs","Albums","Artists","Playlists"] as Tab[]).map(v => <Button variant="ghost" className={tab === v ? "active" : ""} key={v} onClick={() => setTab(v)}>{v}</Button>)}</div><div className="library-tools"><Button variant="ghost" onClick={() => playList(p.library, true)} disabled={!p.library.length}><Shuffle/>Shuffle all</Button><select aria-label="Sort library" value={sort} onChange={e => setSort(e.target.value)}><option>Recently Added</option><option>Title A–Z</option><option>Artist A–Z</option></select></div></>}
+          {screen !== "library" || tab === "Songs" ? rows(list) : tab === "Albums" ? albumGrid(albums) : tab === "Artists" ? <div className="artist-list">{artists.length ? artists.map(a => <Button variant="ghost" key={a} onClick={() => {setQuery(a);go("search")}}><Art track={p.library.find(t => t.artist === a)}/><span>{a}</span><ChevronRight/></Button>) : <Empty onAdd={() => files.current?.click()} label="No artists yet" />}</div> : <><div className="create-playlist"><input placeholder="New playlist name" aria-label="New playlist name" value={playlistName} onChange={e => setPlaylistName(e.target.value)} onKeyDown={e => e.key === "Enter" && addPlaylist()}/><Button onClick={addPlaylist} disabled={!playlistName.trim()}><Plus/>Create</Button></div>{playlists.length ? playlists.map(x => <Button key={x.name} variant="ghost" className="playlist-row" onClick={() => {setSelectedPlaylist(x.name);go("playlist")}}><Music2/>{x.name}<small>{x.ids.length} songs</small><ChevronRight/></Button>) : <p className="muted-note">No playlists yet.</p>}</>}
+        </>}
+        {(screen === "album" || screen === "playlist") && <><header className="detail-head"><Button variant="ghost" size="icon" onClick={back} title="Back"><ArrowLeft/></Button><span>{screen === "album" ? "Album" : "Playlist"}</span></header><div className="detail-cover">{screen === "album" ? <img src={coverFor(selectedAlbum)} alt="Album artwork illustration"/> : <Music2/>}</div><div className="detail-intro"><h1>{screen === "album" ? selectedAlbum : selectedPlaylist}</h1><p>{screen === "album" ? p.library.find(t => t.album === selectedAlbum)?.artist : "Created by you"}</p><small>{list.length} songs</small></div><div className="detail-actions"><Button onClick={() => playList(list)} disabled={!list.length}><Play/>Play</Button><Button variant="outline" onClick={() => playList(list, true)} disabled={!list.length}><Shuffle/>Shuffle</Button></div>{rows(list)}</>}
+        {screen === "explore" && <><header className="page-head"><div><p className="eyebrow">BEYOND YOUR LIBRARY</p><h1>Explore</h1></div><Compass/></header><div className="feature explore-feature" style={{backgroundImage:`linear-gradient(0deg, var(--feature-shade), transparent 70%), url(${featured})`}}><div><h2>Find your next favorite.</h2><p>Start with the music you already love.</p></div></div><div className="section-title"><h2>Your albums</h2></div>{albums.length ? albumGrid(albums) : <p className="muted-note">Add your music to explore your own collection.</p>}<div className="service-note"><h3>YouTube discovery</h3><p>Online discovery is not configured. No online results are shown.</p></div></>}
+        {screen === "ai" && <><header className="page-head"><div><p className="eyebrow">SPOILED</p><h1><Sparkles className="title-icon"/> Music Assistant</h1></div></header><div className="assistant-panel"><p className="assistant-intro">Ask about the music in your library.</p>{aiText && <p className="chat-user">{aiText}</p>}{aiReply && <p className="chat-reply">{aiReply}</p>}</div><form className="ai-input" onSubmit={e => {e.preventDefault(); if (!aiText.trim()) return; setAiReply(p.library.length ? `I can see ${p.library.length} song${p.library.length === 1 ? "" : "s"} in your local library. Online AI recommendations aren't configured yet.` : "Add some music to your library first. Online AI recommendations aren't configured yet.");}}><input value={aiText} onChange={e => setAiText(e.target.value)} placeholder="Ask about your music…"/><Button size="icon" type="submit" title="Send"><ChevronRight/></Button></form></>}
+        {screen === "settings" && <><header className="page-head"><div><p className="eyebrow">SPOILED</p><h1>Settings</h1></div><Button variant="ghost" size="icon" title="Back" onClick={back}><X/></Button></header><div className="settings-brand"><img src={logo.url} alt="SPOILED logo"/><div><strong>SPOILED</strong><small>Your music. Your world.</small></div><ChevronRight/></div><div className="settings-group"><div className="settings-row"><Music2/><span>Local music</span><strong>{p.library.length} songs</strong></div><Button variant="ghost" className="settings-row" onClick={() => folder.current?.click()}><FolderPlus/><span>Import folder</span><ChevronRight/></Button><div className="settings-row"><SlidersHorizontal/><span>Crossfade</span><label>{p.crossfade}s <input aria-label="Crossfade seconds" type="range" min="0" max="12" value={p.crossfade} onChange={e => p.setCrossfade(+e.target.value)}/></label></div><div className="settings-row"><Volume2/><span>Volume</span><input aria-label="Volume" type="range" min="0" max="1" step="0.01" value={p.volume} onChange={e => p.setVolume(+e.target.value)}/></div></div><div className="settings-group"><div className="settings-row"><Settings2/><span>Appearance</span><select aria-label="Appearance" value={theme} onChange={e => setTheme(e.target.value)}><option>Cream</option><option>Dark</option></select></div><div className="settings-row"><Sparkles/><span>AI</span><small>Not configured</small></div><div className="settings-row"><Compass/><span>YouTube</span><small>Not configured</small></div></div><div className="settings-footer"><img src={logo.url} alt=""/><strong>SPOILED</strong><small>Your Music. Your World.</small></div></>}
+        {(screen === "now" || screen === "lyrics" || screen === "queue") && <div className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""}`}><div className="player-top"><Button variant="ghost" size="icon" title="Close player" onClick={back}><ChevronDown/></Button><span>{screen === "queue" ? "UP NEXT" : screen === "lyrics" ? "LYRICS" : "NOW PLAYING"}</span><Button variant="ghost" size="icon" title="Queue" onClick={() => go("queue")}><ListMusic/></Button></div>
+          {screen === "queue" ? <><div className="queue-intro"><h1>Up next</h1><p>{p.queue.length} tracks in queue</p></div>{p.queue.length ? p.queue.map((id,i) => { const t = p.library.find(x => x.id === id); return t ? <div className="queue-row" key={`${id}-${i}`}><Art track={t}/><span><strong>{t.title}</strong><small>{t.artist}{i === p.index ? " · Playing" : ""}</small></span><Button variant="ghost" size="icon" title="Remove from queue" onClick={() => p.removeFromQueue(i)} disabled={i === p.index}><X/></Button></div> : null; }) : <p className="muted-note">Your queue is empty.</p>}</> : screen === "lyrics" ? <><div className="segmented player-tabs"><Button variant="ghost" className="active">Lyrics</Button><Button variant="ghost" onClick={() => go("ai")}>AI</Button></div><div className="lyrics-body">{p.current ? lyrics[p.current.id] ? <p>{lyrics[p.current.id]}</p> : <><h2>No lyrics yet</h2><p>Add your own lyrics for {p.current.title}.</p><textarea aria-label="Add lyrics" value={lyricDraft} onChange={e => setLyricDraft(e.target.value)} placeholder="Paste lyrics you have permission to use…"/><Button onClick={() => {setLyrics(v => ({...v, [p.current?.id ?? ""]: lyricDraft})); setLyricDraft("");}} disabled={!lyricDraft.trim()}>Save lyrics</Button></> : <p>Choose a song to see lyrics.</p>}</div></> : <><div className="large-cover"><Art track={p.current}/></div><div className="song-heading"><div><h1>{p.current?.title ?? "Nothing playing"}</h1><p>{p.current?.artist ?? "Add music to begin"}</p></div>{p.current && <Button variant="ghost" size="icon" title="Love song" onClick={() => p.toggleLike(p.current?.id ?? "")}><Heart className={p.current.liked ? "filled-heart" : ""}/></Button>}</div></>}
+          {screen !== "queue" && <><div className="seek-block"><input aria-label="Seek" type="range" min="0" max={p.duration || 1} step="0.1" value={p.time} onChange={e => p.seek(+e.target.value)}/><div><span>{fmt(p.time)}</span><span>-{fmt(Math.max(0, p.duration - p.time))}</span></div></div><div className="player-controls"><Button variant="ghost" size="icon" title="Shuffle" onClick={() => p.setShuffle(!p.shuffle)} className={p.shuffle ? "control-active" : ""}><Shuffle/></Button><Button variant="ghost" size="icon" title="Previous" onClick={p.prev}><SkipBack/></Button><Button className="big-play" size="icon" title={p.playing ? "Pause" : "Play"} onClick={p.toggle}>{p.playing ? <Pause/> : <Play/>}</Button><Button variant="ghost" size="icon" title="Next" onClick={p.next}><SkipForward/></Button><Button variant="ghost" size="icon" title="Repeat" onClick={() => p.setRepeat(!p.repeat)} className={p.repeat ? "control-active" : ""}><Repeat2/></Button></div><div className="player-bottom"><Button variant="ghost" onClick={() => go("lyrics")}>Lyrics</Button><Button variant="ghost" onClick={() => go("queue")}><ListMusic/>Queue</Button><Button variant="ghost" onClick={() => go("ai")}><Sparkles/>AI</Button></div></>}
+        </div>}
+      </main>
     </div>
-  );
+    {message && <div className="toast" role="status" onClick={() => setMessage("")}>{message}<Button variant="ghost" size="icon" title="Dismiss" onClick={() => setMessage("")}><X/></Button></div>}
+    {p.current && !["now","lyrics","queue"].includes(screen) && <div className="mini-player"><Button variant="ghost" className="mini-song" onClick={() => go("now")}><Art track={p.current}/><span><strong>{p.current.title}</strong><small>{p.current.artist}</small></span></Button><Button variant="ghost" size="icon" title="Previous" onClick={p.prev}><SkipBack/></Button><Button variant="ghost" size="icon" title={p.playing ? "Pause" : "Play"} onClick={p.toggle}>{p.playing ? <Pause/> : <Play/>}</Button><Button variant="ghost" size="icon" title="Open player" onClick={() => go("now")} className="mini-open"><ChevronRight/></Button><div className="mini-progress" style={{width:`${p.duration ? p.time / p.duration * 100 : 0}%`}}/></div>}
+    <nav className="bottom-nav" aria-label="Main navigation">{nav.map(({screen:s,label,icon:Icon}) => <Button variant="ghost" key={s} onClick={() => go(s)} className={activeNav === s ? "active" : ""}><Icon/><span>{label}</span></Button>)}</nav>
+  </div>;
 }
+
+function Empty({label, onAdd}: {label:string; onAdd:()=>void}) { return <div className="empty-state"><Music2/><h3>{label}</h3><p>Choose audio files from your device to get started.</p><Button onClick={onAdd}><Plus/>Add music</Button></div>; }

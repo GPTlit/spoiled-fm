@@ -21,3 +21,4 @@ Object.defineProperty(window, "matchMedia", {
 
 window.HTMLMediaElement.prototype.play = () => Promise.resolve();
 window.HTMLMediaElement.prototype.pause = () => {};
+window.HTMLCanvasElement.prototype.getContext = () => null;

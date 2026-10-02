@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, Compass, Disc3, FolderPlus, Heart, Home, Library, ListMusic, Mic, MoreHorizontal, Music2, Pause, Play, Plus, Repeat2, Search, Settings2, Shuffle, SkipBack, SkipForward, SlidersHorizontal, Sparkles, Volume2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PlayerProvider, usePlayer, fmt, type Track } from "@/lib/player";
@@ -54,6 +54,18 @@ function MusicApp() {
   const [lyricDraft, setLyricDraft] = useState("");
   const [aiText, setAiText] = useState("");
   const [aiReply, setAiReply] = useState("");
+  const [savedReady, setSavedReady] = useState(false);
+  useEffect(() => {
+    try {
+      const savedPlaylists = JSON.parse(localStorage.getItem("spoiled-playlists") || "[]");
+      const savedLyrics = JSON.parse(localStorage.getItem("spoiled-lyrics") || "{}");
+      if (Array.isArray(savedPlaylists)) setPlaylists(savedPlaylists);
+      if (savedLyrics && typeof savedLyrics === "object" && !Array.isArray(savedLyrics)) setLyrics(savedLyrics);
+    } catch { /* Ignore invalid previous browser data. */ }
+    setSavedReady(true);
+  }, []);
+  useEffect(() => { if (savedReady) localStorage.setItem("spoiled-playlists", JSON.stringify(playlists)); }, [playlists, savedReady]);
+  useEffect(() => { if (savedReady) localStorage.setItem("spoiled-lyrics", JSON.stringify(lyrics)); }, [lyrics, savedReady]);
   const go = (next: Screen) => { setPrevious(screen); setScreen(next); setMenu(null); };
   const back = () => { setScreen(previous === screen ? "home" : previous); setMenu(null); };
   const list = useMemo(() => {

@@ -134,7 +134,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const goTo = useCallback((i: number, fade = false) => {
     const { queue, library, repeat } = stateRef.current;
     let n = i;
-    if (n >= queue.length) { if (!repeat) { setPlaying(false); return; } n = 0; }
+    if (n >= queue.length) { if (!repeat) { decks.current[active.current]?.pause(); setPlaying(false); return; } n = 0; }
     if (n < 0) n = 0;
     const t = library.find((x) => x.id === queue[n]);
     if (!t) return;
@@ -150,7 +150,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
       const { crossfade, index } = stateRef.current;
-      if (!fading.current && !a.paused && a.duration && crossfade > 0 && a.duration - a.currentTime <= crossfade) {
+      if (!fading.current && !a.paused && a.duration && crossfade > 0 && a.duration - a.currentTime <= crossfade && (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)) {
         goTo(index + 1, true);
       }
     };

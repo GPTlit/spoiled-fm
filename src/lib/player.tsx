@@ -40,7 +40,7 @@ export const usePlayer = () => {
 function parseName(name: string) {
   const base = name.replace(/\.[^.]+$/, "").replace(/_/g, " ");
   const parts = base.split(" - ");
-  if (parts.length >= 2) return { artist: parts[0].trim(), title: parts.slice(1).join(" - ").trim() };
+  if (parts.length >= 2) return { artist: parts[0]!.trim(), title: parts.slice(1).join(" - ").trim() };
   return { artist: "Unknown artist", title: base.trim() };
 }
 

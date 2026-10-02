@@ -1,10 +1,30 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
-export type Track = { id: string; title: string; artist: string; album: string; url: string; duration?: number; liked?: boolean; hue: number };
+export type Track = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  url: string;
+  duration?: number;
+  liked?: boolean;
+  hue: number;
+};
 
 const DB_NAME = "spoiled-local-music";
 function openLibrary(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      return reject(new Error("indexedDB is not available"));
+    }
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore("tracks", { keyPath: "id" });
     request.onsuccess = () => resolve(request.result);
@@ -16,7 +36,8 @@ async function saveTrack(track: Track, file: File) {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction("tracks", "readwrite");
     tx.objectStore("tracks").put({ ...track, url: undefined, file });
-    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
   db.close();
 }
@@ -59,7 +80,8 @@ export const usePlayer = () => {
 function parseName(name: string) {
   const base = name.replace(/\.[^.]+$/, "").replace(/_/g, " ");
   const parts = base.split(" - ");
-  if (parts.length >= 2) return { artist: parts[0]!.trim(), title: parts.slice(1).join(" - ").trim() };
+  if (parts.length >= 2)
+    return { artist: parts[0]!.trim(), title: parts.slice(1).join(" - ").trim() };
   return { artist: "Unknown artist", title: base.trim() };
 }
 
@@ -84,18 +106,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true;
-    openLibrary().then((db) => {
-      const tx = db.transaction("tracks", "readonly");
-      const request = tx.objectStore("tracks").getAll();
-      request.onsuccess = () => {
-        if (alive) setLibrary((previous) => {
-          const existing = new Set(previous.map((t) => t.id));
-          return [...request.result.filter((t: Track) => !existing.has(t.id)).map((t: Track & { file: File }) => ({ ...t, url: URL.createObjectURL(t.file) })), ...previous];
-        });
-        db.close();
-      };
-    }).catch(console.error);
-    return () => { alive = false; };
+    openLibrary()
+      .then((db) => {
+        const tx = db.transaction("tracks", "readonly");
+        const request = tx.objectStore("tracks").getAll();
+        request.onsuccess = () => {
+          if (alive)
+            setLibrary((previous) => {
+              const existing = new Set(previous.map((t) => t.id));
+              return [
+                ...request.result
+                  .filter((t: Track) => !existing.has(t.id))
+                  .map((t: Track & { file: File }) => ({ ...t, url: URL.createObjectURL(t.file) })),
+                ...previous,
+              ];
+            });
+          db.close();
+        };
+      })
+      .catch((err) => {
+        if (typeof indexedDB !== "undefined") console.error(err);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const loadOnDeck = useCallback((track: Track, fade: boolean) => {
@@ -118,7 +152,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         to.volume = vol * Math.sin((p * Math.PI) / 2);
         from.volume = vol * Math.cos((p * Math.PI) / 2);
         if (p < 1) requestAnimationFrame(step);
-        else { from.pause(); from.volume = vol; fading.current = false; }
+        else {
+          from.pause();
+          from.volume = vol;
+          fading.current = false;
+        }
       };
       requestAnimationFrame(step);
       active.current = toIdx;
@@ -131,52 +169,96 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPlaying(true);
   }, []);
 
-  const goTo = useCallback((i: number, fade = false) => {
-    const { queue, library, repeat } = stateRef.current;
-    let n = i;
-    if (n >= queue.length) { if (!repeat) { decks.current[active.current]?.pause(); setPlaying(false); return; } n = 0; }
-    if (n < 0) n = 0;
-    const t = library.find((x) => x.id === queue[n]);
-    if (!t) return;
-    setIndex(n);
-    loadOnDeck(t, fade);
-  }, [loadOnDeck]);
+  const goTo = useCallback(
+    (i: number, fade = false) => {
+      const { queue, library, repeat } = stateRef.current;
+      let n = i;
+      if (n >= queue.length) {
+        if (!repeat) {
+          decks.current[active.current]?.pause();
+          setPlaying(false);
+          return;
+        }
+        n = 0;
+      }
+      if (n < 0) n = 0;
+      const t = library.find((x) => x.id === queue[n]);
+      if (!t) return;
+      setIndex(n);
+      loadOnDeck(t, fade);
+    },
+    [loadOnDeck],
+  );
 
   useEffect(() => {
-    const make = () => { const a = new Audio(); a.preload = "auto"; return a; };
+    const make = () => {
+      const a = new Audio();
+      a.preload = "auto";
+      return a;
+    };
     decks.current = [make(), make()];
     const tick = () => {
       const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
       const { crossfade, index } = stateRef.current;
-      if (!fading.current && !a.paused && a.duration && crossfade > 0 && a.duration - a.currentTime <= crossfade && (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)) {
+      if (
+        !fading.current &&
+        !a.paused &&
+        a.duration &&
+        crossfade > 0 &&
+        a.duration - a.currentTime <= crossfade &&
+        (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)
+      ) {
         goTo(index + 1, true);
       }
     };
     const onEnded = (e: Event) => {
-      if (e.target === decks.current[active.current] && !fading.current) goTo(stateRef.current.index + 1);
+      if (e.target === decks.current[active.current] && !fading.current)
+        goTo(stateRef.current.index + 1);
     };
-    decks.current.forEach((a) => { a.addEventListener("timeupdate", tick); a.addEventListener("ended", onEnded); });
+    decks.current.forEach((a) => {
+      a.addEventListener("timeupdate", tick);
+      a.addEventListener("ended", onEnded);
+    });
     return () => decks.current.forEach((a) => a.pause());
   }, [goTo]);
 
   useEffect(() => {
     if (!current || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-    navigator.mediaSession.metadata = new MediaMetadata({ title: current.title, artist: current.artist, album: current.album });
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: current.title,
+      artist: current.artist,
+      album: current.album,
+    });
     navigator.mediaSession.setActionHandler("nexttrack", () => goTo(stateRef.current.index + 1));
-    navigator.mediaSession.setActionHandler("previoustrack", () => goTo(stateRef.current.index - 1));
+    navigator.mediaSession.setActionHandler("previoustrack", () =>
+      goTo(stateRef.current.index - 1),
+    );
   }, [current, goTo]);
 
   const addFiles = (files: FileList) => {
-    const accepted = Array.from(files).filter((f) => f.type.startsWith("audio") || /\.(mp3|flac|wav|m4a|ogg|aac)$/i.test(f.name));
+    const accepted = Array.from(files).filter(
+      (f) => f.type.startsWith("audio") || /\.(mp3|flac|wav|m4a|ogg|aac)$/i.test(f.name),
+    );
     const added: Track[] = accepted.map((f) => {
       const { artist, title } = parseName(f.name);
-      const folder = (f as File & { webkitRelativePath?: string }).webkitRelativePath?.split("/").slice(-2, -1)[0];
-      return { id: crypto.randomUUID(), title, artist, album: folder || "Singles", url: URL.createObjectURL(f), hue: Math.floor(Math.random() * 60) + 20 };
+      const folder = (f as File & { webkitRelativePath?: string }).webkitRelativePath
+        ?.split("/")
+        .slice(-2, -1)[0];
+      return {
+        id: crypto.randomUUID(),
+        title,
+        artist,
+        album: folder || "Singles",
+        url: URL.createObjectURL(f),
+        hue: Math.floor(Math.random() * 60) + 20,
+      };
     });
     setLibrary((l) => [...l, ...added]);
-    added.forEach((track, i) => { void saveTrack(track, accepted[i]!).catch(console.error); });
+    added.forEach((track, i) => {
+      void saveTrack(track, accepted[i]!).catch(console.error);
+    });
   };
 
   const playTrack = (id: string, list?: string[]) => {
@@ -189,32 +271,85 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const toggle = () => {
     const a = decks.current[active.current]!;
-    if (!a?.src) { if (library[0]) playTrack(library[0].id); return; }
-    if (a.paused) { void a.play(); setPlaying(true); } else { a.pause(); setPlaying(false); }
+    if (!a?.src) {
+      if (library[0]) playTrack(library[0].id);
+      return;
+    }
+    if (a.paused) {
+      void a.play();
+      setPlaying(true);
+    } else {
+      a.pause();
+      setPlaying(false);
+    }
   };
 
   return (
-    <PlayerCtx.Provider value={{
-      library, queue, index, playing, time, duration, volume, crossfade, shuffle, repeat, current,
-      addFiles, playTrack, toggle,
-      next: () => goTo(index + 1, crossfade > 0),
-      prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
-      seek: (t) => { decks.current[active.current]!.currentTime = t; },
-      setVolume: (v) => { setVolumeS(v); decks.current.forEach((a) => (a.volume = v)); },
-      setCrossfade, setShuffle, setRepeat,
-      enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),
-      removeFromQueue: (i) => { setQueue((q) => q.filter((_, j) => j !== i)); if (i < index) setIndex(index - 1); },
-      moveInQueue: (from, to) => setQueue((q) => { const c = [...q]; const [x] = c.splice(from, 1); if (x) c.splice(to, 0, x); return c; }),
-      toggleLike: (id) => setLibrary((l) => l.map((t) => {
-        if (t.id !== id) return t;
-        const updated = { ...t, liked: !t.liked };
-        void openLibrary().then((db) => { const tx = db.transaction("tracks", "readwrite"); const request = tx.objectStore("tracks").get(id); request.onsuccess = () => { if (request.result) tx.objectStore("tracks").put({ ...request.result, liked: updated.liked }); }; tx.oncomplete = () => db.close(); });
-        return updated;
-      })),
-    }}>
+    <PlayerCtx.Provider
+      value={{
+        library,
+        queue,
+        index,
+        playing,
+        time,
+        duration,
+        volume,
+        crossfade,
+        shuffle,
+        repeat,
+        current,
+        addFiles,
+        playTrack,
+        toggle,
+        next: () => goTo(index + 1, crossfade > 0),
+        prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
+        seek: (t) => {
+          decks.current[active.current]!.currentTime = t;
+        },
+        setVolume: (v) => {
+          setVolumeS(v);
+          decks.current.forEach((a) => (a.volume = v));
+        },
+        setCrossfade,
+        setShuffle,
+        setRepeat,
+        enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),
+        removeFromQueue: (i) => {
+          setQueue((q) => q.filter((_, j) => j !== i));
+          if (i < index) setIndex(index - 1);
+        },
+        moveInQueue: (from, to) =>
+          setQueue((q) => {
+            const c = [...q];
+            const [x] = c.splice(from, 1);
+            if (x) c.splice(to, 0, x);
+            return c;
+          }),
+        toggleLike: (id) =>
+          setLibrary((l) =>
+            l.map((t) => {
+              if (t.id !== id) return t;
+              const updated = { ...t, liked: !t.liked };
+              void openLibrary().then((db) => {
+                const tx = db.transaction("tracks", "readwrite");
+                const request = tx.objectStore("tracks").get(id);
+                request.onsuccess = () => {
+                  if (request.result)
+                    tx.objectStore("tracks").put({ ...request.result, liked: updated.liked });
+                };
+                tx.oncomplete = () => db.close();
+              });
+              return updated;
+            }),
+          ),
+      }}
+    >
       {children}
     </PlayerCtx.Provider>
   );
 }
 
-export const fmt = (s: number) => (!s || !isFinite(s) ? "0:00" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`);
+export const fmt = (s: number) =>
+  !s || !isFinite(s)
+    ? "0:00"
+    : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;

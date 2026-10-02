@@ -1,4 +1,5 @@
 # SPOILED
+
 - [x] Recreate supplied prototype's home, library, album, player, lyrics, assistant, explore, and settings screens.
 - [x] Use the supplied SPOILED logo and matching favicon.
 - [x] Keep local-file playback and persist imported tracks.

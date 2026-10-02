@@ -30,7 +30,7 @@ export const Route = createFileRoute("/")({
   component: () => <PlayerProvider><MusicApp /></PlayerProvider>,
 });
 
-function Art({ track, className = "" }: { track?: Track; className?: string }) {
+function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
   return <div className={`art ${className}`}><img src={track ? coverFor(track.album) : logo.url} alt={track ? `${track.album} artwork illustration` : "SPOILED"} /></div>;
 }
 
@@ -68,7 +68,7 @@ function MusicApp() {
   }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort]);
   const albums = useMemo(() => [...new Set(p.library.map(t => t.album))], [p.library]);
   const artists = useMemo(() => [...new Set(p.library.map(t => t.artist))], [p.library]);
-  const playList = (tracks: Track[], shuffle = false) => { if (!tracks.length) return; const ids = tracks.map(t => t.id); if (shuffle) ids.sort(() => Math.random() - .5); p.playTrack(ids[0], ids); };
+  const playList = (tracks: Track[], shuffle = false) => { if (!tracks.length) return; const ids = tracks.map(t => t.id); if (shuffle) ids.sort(() => Math.random() - .5); const first = ids[0]; if (first) p.playTrack(first, ids); };
   const addPlaylist = () => { const name = playlistName.trim(); if (name && !playlists.some(x => x.name === name)) { setPlaylists(v => [...v, { name, ids: [] }]); setPlaylistName(""); setMessage(`Created ${name}`); } };
   const addToPlaylist = (id: string, name: string) => { setPlaylists(v => v.map(x => x.name === name ? { ...x, ids: [...new Set([...x.ids, id])] } : x)); setMenu(null); setMessage(`Added to ${name}`); };
   const rows = (tracks: Track[]) => tracks.length ? <div className="track-list">{tracks.map((t, i) => <div key={t.id} className="track-row">

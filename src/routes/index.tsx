@@ -248,11 +248,11 @@ function MusicApp() {
   } | null>(null);
 
   const [savedReady, setSavedReady] = useState(false);
-  const pendingArtwork = useRef<{ filename: string; previousIds: Set<string>; thumbnail: string } | null>(null);
+  const pendingArtwork = useRef<{ previousIds: Set<string>; thumbnail: string } | null>(null);
   useEffect(() => {
     const pending = pendingArtwork.current;
     if (!pending) return;
-    const track = p.library.find((item) => !pending.previousIds.has(item.id) && `${item.title}.mp3` === pending.filename);
+    const track = p.library.find((item) => !pending.previousIds.has(item.id));
     if (!track) return;
     pendingArtwork.current = null;
     void fetch(pending.thumbnail).then((response) => {
@@ -573,28 +573,8 @@ function MusicApp() {
       const res = await fetch(url);
 
       if (!res.ok) {
-        // When server-side download is restricted by YouTube's cloud verification,
-        // automatically trigger the instant high-speed browser downloader without failing!
-        const fallbackUrls = {
-          downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
-          y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
-          ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
-        };
-        setBotFallbackInfo(fallbackUrls);
-
-        const targetDirectUrl =
-          downloadType === "audio" ? fallbackUrls.y2mate : fallbackUrls.downloader10;
-
-        const link = document.createElement("a");
-        link.href = targetDirectUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable — import a file you own instead" } : item));
-        setMessage("This video cannot be downloaded here. Import an audio file you own instead.");
+        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item));
+        setMessage("Download unavailable. You can add audio files you own to your library.");
         return;
       }
 
@@ -617,29 +597,9 @@ function MusicApp() {
       setMessage(`Downloaded "${filename}" successfully!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
-      console.error("Server download attempt error, launching direct download:", err);
-      // Auto fallback to direct browser download on any network/server exception
-      const directUrl =
-        downloadType === "audio"
-          ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
-          : `https://10downloader.com/download?v=${downloadModalVideo.id}`;
-
-      setBotFallbackInfo({
-        downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
-        y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
-        ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
-      });
-
-      const link = document.createElement("a");
-      link.href = directUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable — import a file you own instead" } : item));
-      setMessage("This video cannot be downloaded here. Import an audio file you own instead.");
+      console.error("Download error:", err);
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item));
+      setMessage("Download failed. Please try again later.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -657,17 +617,7 @@ function MusicApp() {
       const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
       const res = await fetch(url);
       if (!res.ok) {
-        // Fallback: trigger direct audio download and advise user to add to library
-        const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
-        const link = document.createElement("a");
-        link.href = directAudioUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable — import a file you own instead" } : item));
+        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item));
         setMessage("Audio isn't available for import. Add an audio file you own instead.");
         return;
       }
@@ -676,24 +626,15 @@ function MusicApp() {
       const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
       const before = new Set(p.library.map((track) => track.id));
       await p.addFiles([file]);
-      // addFiles returns before React commits library state, so match by the imported filename after state updates.
-      pendingArtwork.current = { filename: file.name, previousIds: before, thumbnail: downloadModalVideo.thumbnail };
+      // The imported track is committed on the next render.
+      pendingArtwork.current = { previousIds: before, thumbnail: downloadModalVideo.thumbnail };
       setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item));
       setMessage(`"${downloadModalVideo.title}" added to your local library!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
-      console.error("Save to library server stream error:", err);
-      const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
-      const link = document.createElement("a");
-      link.href = directAudioUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable — import a file you own instead" } : item));
-      setMessage("Audio isn't available for import. Add an audio file you own instead.");
+      console.error("Save to library error:", err);
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item));
+      setMessage("Audio couldn't be imported. Add an audio file you own instead.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -1335,53 +1276,17 @@ function MusicApp() {
               {(
 
                 <div>
-                  <div className="video-search-bar explore-secondary-search">
-                    <div className="video-search-input-wrap">
-                      <input
-                        placeholder="Search songs, artists, live concerts, or videos…"
-                        value={youtubeQuery}
-                        onChange={(e) => setYoutubeQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && youtubeQuery.trim()) {
-                            void searchOnlineVideos(youtubeQuery.trim());
-                          }
-                        }}
-                      />
-                      {youtubeQuery && (
-                        <button
-                          type="button"
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            setYoutubeQuery("");
-                            setOnlineVideos([]);
-                          }}
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                    <Button
-                      className="video-search-btn"
-                      onClick={() =>
-                        youtubeQuery.trim() && void searchOnlineVideos(youtubeQuery.trim())
-                      }
-                      disabled={onlineLoading}
-                    >
-                      <Search className="h-4 w-4" /> Search
-                    </Button>
-                  </div>
-
                   {/* Online Video Grid if searched */}
                   {onlineVideos.length > 0 && (
                     <div>
                       <div className="section-title">
                         <h2 className="flex items-center gap-2">
-                          <Youtube className="text-red-500 h-5 w-5" /> Video Results (
+                          Videos (
                           {onlineVideos.length})
                         </h2>
                         {onlineLoading && (
                           <span className="text-xs text-muted-foreground animate-pulse">
-                            Searching YouTube…
+                            Searching…
                           </span>
                         )}
                       </div>
@@ -2310,14 +2215,14 @@ function MusicApp() {
           )}
 
           {(screen === "now" || screen === "lyrics" || screen === "queue") && (
-            <div className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""}`}>
+            <div className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""} ${screen === "queue" ? "queue-screen" : ""}`}>
               <div className="player-top">
                 <Button
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
                   title="Close player"
-                  onClick={back}
+                  onClick={() => { setScreen(["now", "lyrics", "queue"].includes(previous) ? "home" : previous); setMenu(null); }}
                 >
                   <ChevronDown />
                 </Button>
@@ -2533,8 +2438,8 @@ function MusicApp() {
                     <Button variant="ghost" onClick={() => go("queue")}>
                       <ListMusic className="mr-1 h-4 w-4" /> Queue
                     </Button>
-                    <Button variant="ghost" onClick={() => go("ai")}>
-                      <Sparkles className="mr-1 h-4 w-4" /> AI Curator
+                    <Button variant="ghost" onClick={() => { setInfoDraft({ title: p.current?.title ?? "", artist: p.current?.artist ?? "", album: p.current?.album ?? "" }); setEditInfo(true); }} disabled={!p.current}>
+                      <SlidersHorizontal className="mr-1 h-4 w-4" /> Info
                     </Button>
                   </div>
                 </>
@@ -2764,48 +2669,6 @@ function MusicApp() {
               )}
 
               {/* Direct Fast Downloader Active Info */}
-              {botFallbackInfo && (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                    <Check className="h-4 w-4 shrink-0 text-emerald-500" />
-                    <span>Direct Fast Download Ready</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Your high-speed download was launched in a new tab! If your browser prevented
-                    the tab from opening, click any format below:
-                  </p>
-                  <div className="flex flex-col gap-2 pt-1">
-                    <a
-                      href={botFallbackInfo.downloader10}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5"
-                    >
-                      <Download className="h-4 w-4" /> Download MP4 Video (All Qualities){" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <a
-                      href={botFallbackInfo.y2mate}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-red-600 to-rose-700"
-                    >
-                      <Music className="h-4 w-4" /> Download MP3 Audio (320kbps){" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <a
-                      href={botFallbackInfo.ssyoutube}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-700"
-                    >
-                      <Film className="h-4 w-4" /> Download via SSYouTube{" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                </div>
-              )}
-
               {/* Download Buttons */}
               <div className="flex flex-col gap-2.5 pt-2">
                 <Button
@@ -2827,23 +2690,7 @@ function MusicApp() {
                   )}
                 </Button>
 
-                {/* Instant 1-Click External Direct Download Button */}
-                <a
-                  href={
-                    downloadType === "audio"
-                      ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
-                      : `https://10downloader.com/download?v=${downloadModalVideo.id}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full h-10 px-4 rounded-xl border border-white/40 dark:border-white/20 bg-white/30 dark:bg-white/10 hover:bg-white/50 dark:hover:bg-white/20 flex items-center justify-center gap-2 text-xs font-semibold text-foreground no-underline transition-all shadow-sm"
-                >
-                  <ExternalLink className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>
-                    ⚡ Instant Browser Download (
-                    {downloadType === "video" ? "MP4 Video" : "MP3 Audio"})
-                  </span>
-                </a>
+
 
                 {downloadType === "audio" && (
                   <Button

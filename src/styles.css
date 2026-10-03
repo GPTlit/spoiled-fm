@@ -3466,3 +3466,10 @@ html, body, #root { width: 100%; max-width: 100%; overflow-x: clip; }
 .immersive-player .song-heading > div { min-width: 0; overflow: hidden; }
 .immersive-player .song-heading h1, .immersive-player .song-heading p { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 768px) { .fixed-page .main-screen { padding-bottom: 165px; } .immersive-player .main-screen { padding-bottom: 0; } }
+
+.immersive-player .queue-screen .queue-intro { flex: none; }
+.immersive-player .queue-screen .queue-row { min-width: 0; }
+.immersive-player .queue-screen .queue-row span { min-width: 0; overflow: hidden; }
+.immersive-player .queue-screen .queue-row strong, .immersive-player .queue-screen .queue-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.immersive-player .lyrics-screen .lyrics-body > p, .immersive-player .lyrics-screen .lyrics-body > div:not(.lrc-container) { max-height: 100%; overflow-y: auto; }
+@media (prefers-reduced-motion: reduce) { .immersive-player .lrc-container { scroll-behavior: auto; } }

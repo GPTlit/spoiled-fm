@@ -266,7 +266,7 @@ function MusicApp() {
       const activeEl = lrcContainerRef.current.children[activeLrcIndex] as HTMLElement;
       if (activeEl) {
         const container = lrcContainerRef.current;
-        container.scrollTo({ top: activeEl.offsetTop - container.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2, behavior: "smooth" });
+        container.scrollTo({ top: activeEl.offsetTop - container.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
       }
     }
   }, [activeLrcIndex]);

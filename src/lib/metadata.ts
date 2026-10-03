@@ -54,7 +54,7 @@ export async function extractAudioMetadata(file: File): Promise<ParsedAudioMetad
       const pic = common.picture[0]!;
       const mime = pic.format || "image/jpeg";
       // Ensure we create a clean Blob from the picture buffer
-      pictureBlob = new Blob([pic.data], { type: mime });
+      pictureBlob = new Blob([pic.data as BlobPart], { type: mime });
       pictureUrl = URL.createObjectURL(pictureBlob);
     }
 

@@ -1,15 +1,15 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: 'fm.spoiled.app',
-  appName: 'SPOILED',
-  webDir: 'dist/client',
+  appId: "fm.spoiled.app",
+  appName: "SPOILED",
+  webDir: "dist/client",
   server: {
-    url: 'https://spoiled-fm.lovable.app',
+    url: "https://spoiled-fm.lovable.app",
     cleartext: false,
   },
   android: {
-    backgroundColor: '#f6f8fb',
+    backgroundColor: "#f6f8fb",
   },
 };
 

@@ -46,7 +46,6 @@ import {
   Check,
   Loader2,
   AlertCircle,
-  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -241,11 +240,6 @@ function MusicApp() {
   const [downloads, setDownloads] = useState<{ id: string; title: string; status: string }[]>([]);
   const [editInfo, setEditInfo] = useState(false);
   const [infoDraft, setInfoDraft] = useState({ title: "", artist: "", album: "" });
-  const [botFallbackInfo, setBotFallbackInfo] = useState<{
-    downloader10: string;
-    y2mate: string;
-    ssyoutube: string;
-  } | null>(null);
 
   const [savedReady, setSavedReady] = useState(false);
   const pendingArtwork = useRef<{ previousIds: Set<string>; thumbnail: string } | null>(null);
@@ -423,7 +417,9 @@ function MusicApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [p]);
 
+  const playerOrigin = useRef<Screen>("home");
   const go = (next: Screen) => {
+    if (["now", "lyrics", "queue"].includes(next) && !["now", "lyrics", "queue"].includes(screen)) playerOrigin.current = screen;
     setPrevious(screen);
     setScreen(next);
     setMenu(null);
@@ -552,7 +548,6 @@ function MusicApp() {
     setSelectedQuality(defaultType === "audio" ? "320" : "720");
     setDownloadProgressText("");
     setDownloadInProgress(false);
-    setBotFallbackInfo(null);
     setDownloadModalOpen(true);
   };
 
@@ -561,7 +556,6 @@ function MusicApp() {
     setDownloadInProgress(true);
     setDownloads((items) => [{ id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" }, ...items.filter((item) => item.id !== downloadModalVideo.id)]);
     setDownloadModalOpen(false);
-    setBotFallbackInfo(null);
     setDownloadProgressText(
       downloadType === "audio"
         ? `Preparing & encoding ${selectedQuality}kbps audio...`
@@ -2183,26 +2177,6 @@ function MusicApp() {
                     <option>Liquid Obsidian (Dark)</option>
                   </select>
                 </div>
-                <div className="settings-row">
-                  <Sparkles />
-                  <span>AI Curator</span>
-                  <Button variant="ghost" size="sm" onClick={() => go("ai")}>
-                    Open
-                  </Button>
-                </div>
-                <div className="settings-row">
-                  <Youtube />
-                  <span>YouTube Discovery</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      go("explore");
-                    }}
-                  >
-                    Search
-                  </Button>
-                </div>
               </div>
               <div className="settings-footer">
                 <div className="liquid-icon-frame">
@@ -2222,7 +2196,7 @@ function MusicApp() {
                   size="icon"
                   className="glass-icon-btn"
                   title="Close player"
-                  onClick={() => { setScreen(["now", "lyrics", "queue"].includes(previous) ? "home" : previous); setMenu(null); }}
+                  onClick={() => { setScreen(playerOrigin.current); setMenu(null); }}
                 >
                   <ChevronDown />
                 </Button>

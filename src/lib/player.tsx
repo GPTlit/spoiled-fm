@@ -289,7 +289,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadOnDeck = useCallback(
-    (track: Track, fade: boolean) => {
+    (track: Track, fadeSeconds: number) => {
       initAudioNodes();
       if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
         void audioCtxRef.current.resume();
@@ -301,7 +301,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       fadeFrame.current = null;
       fading.current = false;
       const from = d[active.current]!;
-      const shouldFade = fade && !from.paused && stateRef.current.crossfade > 0;
+      const shouldFade = fadeSeconds > 0 && !from.paused;
       const toIdx = shouldFade ? 1 - active.current : active.current;
       const to = d[toIdx]!;
       to.src = track.url;
@@ -314,7 +314,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           from.pause();
           fading.current = false;
         });
-        const ms = Math.max(250, Math.min(stateRef.current.crossfade, from.duration - from.currentTime || stateRef.current.crossfade) * 1000);
+        const ms = Math.max(250, Math.min(fadeSeconds, from.duration - from.currentTime || fadeSeconds) * 1000);
         const start = performance.now();
         const step = (now: number) => {
           if (!fading.current) return;
@@ -344,7 +344,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const goTo = useCallback(
-    (i: number, fade = false) => {
+    (i: number, fadeSeconds = 0) => {
       const { queue, library, repeat } = stateRef.current;
       let n = i;
       if (n >= queue.length) {
@@ -359,7 +359,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const t = library.find((x) => x.id === queue[n]);
       if (!t) return;
       setIndex(n);
-      loadOnDeck(t, fade);
+      loadOnDeck(t, fadeSeconds);
     },
     [loadOnDeck],
   );
@@ -376,17 +376,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
-       const { crossfade, mixMode, index } = stateRef.current;
-       const transition = mixMode === "automix" ? Math.min(crossfade || 4, Math.max(1.5, a.duration * 0.06)) : crossfade;
+      const { crossfade, mixMode, index } = stateRef.current;
+      const transition = mixMode === "automix" ? Math.min(6, Math.max(1.5, a.duration * 0.06)) : crossfade;
       if (
         !fading.current &&
         !a.paused &&
         a.duration &&
-         transition > 0 &&
-         a.duration - a.currentTime <= transition &&
+        transition > 0 &&
+        a.duration - a.currentTime <= transition &&
         (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)
       ) {
-        goTo(index + 1, true);
+        goTo(index + 1, transition);
       }
     };
 
@@ -631,7 +631,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         addFiles,
         playTrack,
         toggle,
-        next: () => goTo(index + 1, crossfade > 0),
+        next: () => goTo(index + 1, mixMode === "automix" ? Math.min(6, Math.max(1.5, (duration || 60) * 0.06)) : crossfade),
         prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
         seek: (t) => {
           const a = decks.current[active.current];

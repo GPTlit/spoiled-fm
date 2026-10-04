@@ -83,102 +83,6 @@ interface StoredTrackRecord extends Omit<Track, "url" | "pictureUrl"> {
   pictureBlob?: Blob;
 }
 
-export const DEFAULT_DEMO_TRACKS = [
-  {
-    fileUrl: "/demo/the-ambient-music.mp3",
-    fileName: "Sevennotes - The Ambient Music.mp3",
-    title: "The Ambient Music",
-    artist: "Sevennotes",
-    album: "The Ambient Music",
-    year: 2025,
-    genre: "Ambient / Electronic",
-    hue: 210,
-  },
-  {
-    fileUrl: "/demo/synthwave-guiding-light.mp3",
-    fileName: "Robert80z - Guiding Light.mp3",
-    title: "Guiding Light",
-    artist: "Robert80z",
-    album: "Guiding Light",
-    year: 2024,
-    genre: "Synthwave / 80s",
-    hue: 320,
-  },
-  {
-    fileUrl: "/demo/lofi-and-roses.mp3",
-    fileName: "Brentin Davis - Lofi And Roses.mp3",
-    title: "Lofi And Roses",
-    artist: "Brentin Davis",
-    album: "Lofi And Roses",
-    year: 2024,
-    genre: "Lofi / Hip-Hop",
-    hue: 45,
-  },
-  {
-    fileUrl: "/demo/summer-pop-energy.mp3",
-    fileName: "SKHSOUNDS - Summer Corporate Positive.mp3",
-    title: "Summer Pop Energy",
-    artist: "SKHSOUNDS",
-    album: "Summer Energy",
-    year: 2025,
-    genre: "Pop / Energy",
-    hue: 130,
-  },
-  {
-    fileUrl: "/demo/ambient-inspiring.mp3",
-    fileName: "makesound - Ambient Inspiring.mp3",
-    title: "Ambient Inspiring",
-    artist: "makesound",
-    album: "Ambient Inspiring",
-    year: 2024,
-    genre: "Indie / Acoustic",
-    hue: 160,
-  },
-  {
-    fileUrl: "/demo/liquid-dreams.mp3",
-    fileName: "SPOILED - Liquid Dreams.mp3",
-    title: "Liquid Dreams",
-    artist: "SPOILED Soundscapes",
-    album: "Liquid Glass Sessions",
-    year: 2026,
-    genre: "Liquid Ambient",
-    hue: 280,
-  },
-];
-
-export async function fetchAndStoreSampleTracks(): Promise<Track[]> {
-  const loaded: Track[] = [];
-  for (const item of DEFAULT_DEMO_TRACKS) {
-    try {
-      const res = await fetch(item.fileUrl);
-      if (!res.ok) continue;
-      const blob = await res.blob();
-      const file = new File([blob], item.fileName, { type: "audio/mpeg" });
-      const meta = await extractAudioMetadata(file);
-      const url = URL.createObjectURL(file);
-      const track: Track = {
-        id: crypto.randomUUID(),
-        title: meta.title && meta.title !== "Unknown Title" ? meta.title : item.title,
-        artist: meta.artist && meta.artist !== "Unknown Artist" ? meta.artist : item.artist,
-        album: meta.album && meta.album !== "Unknown Album" ? meta.album : item.album,
-        year: meta.year || item.year,
-        genre: meta.genre || item.genre,
-        trackNumber: meta.trackNumber || 1,
-        duration: meta.duration || 135,
-        url,
-        pictureUrl: meta.pictureUrl,
-        hasEmbeddedPicture: Boolean(meta.pictureBlob),
-        hue: item.hue,
-      };
-      await saveTrackToIdb(track, file, meta.pictureBlob);
-      loaded.push(track);
-    } catch (err) {
-      console.warn("Could not load sample track:", item.title, err);
-    }
-  }
-  return loaded;
-}
-
 interface Ctx {
   library: Track[];
   queue: string[];
@@ -197,7 +101,6 @@ interface Ctx {
   setEqPreset: (preset: EqPreset) => void;
   setEqGain: (bandIndex: number, gain: number) => void;
   addFiles: (files: FileList | File[]) => Promise<number>;
-  loadSampleMusic: () => Promise<number>;
   addTrackWithArtwork: (
     file: File,
     pictureBlob?: Blob,
@@ -277,53 +180,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       .then((db) => {
         const tx = db.transaction("tracks", "readonly");
         const request = tx.objectStore("tracks").getAll();
-        request.onsuccess = async () => {
+        request.onsuccess = () => {
           if (!alive) return;
           const records = request.result as StoredTrackRecord[];
-          if (records.length > 0) {
-            const restoredTracks: Track[] = records.map((record) => {
-              const url = URL.createObjectURL(record.file);
-              const pictureUrl = record.pictureBlob
-                ? URL.createObjectURL(record.pictureBlob)
-                : undefined;
-              return {
-                id: record.id,
-                title: record.title,
-                artist: record.artist,
-                album: record.album,
-                year: record.year,
-                genre: record.genre,
-                trackNumber: record.trackNumber,
-                duration: record.duration,
-                liked: record.liked,
-                hue: record.hue ?? Math.floor(Math.random() * 60) + 20,
-                url,
-                pictureUrl,
-                hasEmbeddedPicture: Boolean(record.pictureBlob),
-              };
-            });
+          const restoredTracks: Track[] = records.map((record) => {
+            const url = URL.createObjectURL(record.file);
+            const pictureUrl = record.pictureBlob
+              ? URL.createObjectURL(record.pictureBlob)
+              : undefined;
+            return {
+              id: record.id,
+              title: record.title,
+              artist: record.artist,
+              album: record.album,
+              year: record.year,
+              genre: record.genre,
+              trackNumber: record.trackNumber,
+              duration: record.duration,
+              liked: record.liked,
+              hue: record.hue ?? Math.floor(Math.random() * 60) + 20,
+              url,
+              pictureUrl,
+              hasEmbeddedPicture: Boolean(record.pictureBlob),
+            };
+          });
 
-            setLibrary((prev) => {
-              const existing = new Set(prev.map((t) => t.id));
-              const fresh = restoredTracks.filter((t) => !existing.has(t.id));
-              const all = [...fresh, ...prev];
-              if (all.length > 0) {
-                setQueue((q) => (q.length ? q : all.map((t) => t.id)));
-                setIndex((idx) => (idx >= 0 ? idx : 0));
-              }
-              return all;
-            });
-            db.close();
-          } else {
-            db.close();
-            // Automatically populate with real, starter audio files
-            const sampleTracks = await fetchAndStoreSampleTracks();
-            if (alive && sampleTracks.length > 0) {
-              setLibrary(sampleTracks);
-              setQueue(sampleTracks.map((t) => t.id));
-              setIndex(0);
-            }
-          }
+          setLibrary((prev) => {
+            const existing = new Set(prev.map((t) => t.id));
+            const fresh = restoredTracks.filter((t) => !existing.has(t.id));
+            return [...fresh, ...prev];
+          });
+          db.close();
         };
       })
       .catch((err) => {
@@ -443,11 +330,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const to = d[toIdx]!;
       const vol = stateRef.current.volume;
 
-      if (track.url.startsWith("blob:") || track.url.startsWith("data:")) {
-        to.removeAttribute("crossorigin");
-      } else {
-        to.crossOrigin = "anonymous";
-      }
       to.src = track.url;
       to.currentTime = 0;
 
@@ -521,10 +403,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         d.forEach((a, i) => i !== toIdx && a.pause());
         to.volume = vol;
         if (gainNodesRef.current[toIdx]) gainNodesRef.current[toIdx].gain.value = 1;
-        if (masterGainRef.current) masterGainRef.current.gain.value = vol;
-        void to.play().catch((err) => {
-          console.warn("Audio autoplay blocked by browser policy:", err);
-        });
+        void to.play().catch(() => {});
         active.current = toIdx;
       }
       setPlaying(true);
@@ -741,10 +620,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const playTrack = (id: string, list?: string[]) => {
-    initAudioNodes();
-    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-      void audioCtxRef.current.resume().catch(() => {});
-    }
     let q = list ?? library.map((t) => t.id);
     if (shuffle) q = [id, ...q.filter((x) => x !== id).sort(() => Math.random() - 0.5)];
     setQueue(q);
@@ -754,18 +629,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const toggle = () => {
     initAudioNodes();
-    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-      void audioCtxRef.current.resume().catch(() => {});
-    }
     const a = decks.current[active.current]!;
     if (!a?.src) {
       if (library[0]) playTrack(library[0].id);
       return;
     }
     if (a.paused) {
-      void a.play().catch((err) => {
-        console.warn("Audio autoplay blocked by browser policy:", err);
-      });
+      void a.play().catch(() => {});
       setPlaying(true);
     } else {
       a.pause();
@@ -928,24 +798,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         },
         setVolume: (v) => {
           setVolumeS(v);
-          if (masterGainRef.current) masterGainRef.current.gain.value = v;
           if (!fading.current) decks.current.forEach((a) => (a.volume = v));
-        },
-        loadSampleMusic: async () => {
-          const sampleTracks = await fetchAndStoreSampleTracks();
-          if (sampleTracks.length > 0) {
-            setLibrary((prev) => {
-              const existing = new Set(prev.map((t) => t.id));
-              const fresh = sampleTracks.filter((t) => !existing.has(t.id));
-              const next = [...prev, ...fresh];
-              if (index < 0 && next.length > 0) {
-                setQueue(next.map((t) => t.id));
-                setIndex(0);
-              }
-              return next;
-            });
-          }
-          return sampleTracks.length;
         },
         setCrossfade,
         setMixMode,

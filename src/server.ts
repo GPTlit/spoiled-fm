@@ -595,8 +595,7 @@ export default {
       const commonArgs = [
         "--js-runtimes",
         `node:${nodePath}`,
-        "--extractor-args",
-        "youtube:player_client=android,ios,tv_embedded,web_creator,web",
+
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",
@@ -614,7 +613,7 @@ export default {
         args = [
           ...commonArgs,
           "-f",
-          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+          "best",
           "-o",
           templateOutput,
           videoUrl,
@@ -645,17 +644,22 @@ export default {
           const found = tmpFiles.find(
             (f) =>
               f.startsWith(basePrefix) &&
-              (f.endsWith(".mp3") || f.endsWith(".m4a") || f.endsWith(".webm") || f.endsWith(".opus")),
+              (f.endsWith(".mp3") ||
+                f.endsWith(".m4a") ||
+                f.endsWith(".webm") ||
+                f.endsWith(".opus") ||
+                f.endsWith(".mp4")),
           );
           if (found) {
             const actualFile = path.resolve("/tmp", found);
             const fileBuffer = await fs.promises.readFile(actualFile);
             await fs.promises.unlink(actualFile).catch(() => {});
             const foundExt = path.extname(found).replace(".", "") || "mp3";
-            const filename = `${cleanTitle}.${foundExt}`;
+            const isMp4Audio = foundExt === "mp4";
+            const filename = `${cleanTitle}.${isMp4Audio ? "m4a" : foundExt}`;
             return new Response(fileBuffer, {
               headers: {
-                "content-type": foundExt === "m4a" ? "audio/mp4" : "audio/mpeg",
+                "content-type": foundExt === "m4a" || isMp4Audio ? "audio/mp4" : foundExt === "webm" || foundExt === "opus" ? "audio/webm" : "audio/mpeg",
                 "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
                 "content-length": fileBuffer.byteLength.toString(),
                 "access-control-allow-origin": "*",
@@ -663,7 +667,7 @@ export default {
             });
           }
         } catch {
-          // ignore yt-dlp bot check / datacenter IP block
+          // Return the exact-video error below when extraction is unavailable.
         }
 
         // Clean any temp files with prefix

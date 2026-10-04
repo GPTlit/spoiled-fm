@@ -783,8 +783,7 @@ function MusicApp() {
         }
 
         const file = new File([blob], `${sanitized}.${ext}`, {
-          type:
-          ext === "mp3" ? "audio/mpeg" : ext === "webm" ? "audio/webm" : "audio/mp4",
+          type: ext === "mp3" ? "audio/mpeg" : ext === "webm" ? "audio/webm" : "audio/mp4",
         });
 
         const createdTrack = await p.addTrackWithArtwork(file, pictureBlob, {

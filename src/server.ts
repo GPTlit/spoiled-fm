@@ -591,14 +591,13 @@ export default {
       let ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
       let args: string[] = [];
 
-      const nodePath = process.execPath || "/usr/local/bin/node";
+      // Keep extraction independent of browser cookies. The Android client
+      // exposes a public progressive format that avoids the sign-in wall and
+      // the 403 media URLs returned by some server-side clients.
       const commonArgs = [
-        "--js-runtimes",
-        `node:${nodePath}`,
-        // YouTube increasingly gates the web client. Try public, non-login
-        // clients so downloads do not depend on browser cookies or a session.
         "--extractor-args",
-        "youtube:player_client=android,tv,web_safari,mweb",
+        "youtube:player_client=android",
+        "--force-ipv4",
         "--retries",
         "3",
         "--fragment-retries",
@@ -613,16 +612,9 @@ export default {
 
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
-  if (type === "audio") {
-    ext = "m4a";
-    args = [
-      ...commonArgs,
-      "-f",
-      "bestaudio/best",
-      "-o",
-    templateOutput,
-    videoUrl,
-  ];
+      if (type === "audio") {
+        ext = "m4a";
+        args = [...commonArgs, "-f", "bestaudio/best", "-o", templateOutput, videoUrl];
       } else {
         ext = "mp4";
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";
@@ -638,10 +630,10 @@ export default {
         ];
       }
 
-  if (type === "audio") {
-    const fallbackPath = path.resolve("/tmp", `${basePrefix}_audio.mp3`);
-    
-    // Try yt-dlp silently with short timeout
+      if (type === "audio") {
+        const fallbackPath = path.resolve("/tmp", `${basePrefix}_audio.mp3`);
+
+        // Try yt-dlp silently with short timeout
         try {
           await execFileAsync(binaryPath, args, { timeout: 120000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
@@ -663,7 +655,12 @@ export default {
             const filename = `${cleanTitle}.${isMp4Audio ? "m4a" : foundExt}`;
             return new Response(fileBuffer, {
               headers: {
-                "content-type": foundExt === "m4a" || isMp4Audio ? "audio/mp4" : foundExt === "webm" || foundExt === "opus" ? "audio/webm" : "audio/mpeg",
+                "content-type":
+                  foundExt === "m4a" || isMp4Audio
+                    ? "audio/mp4"
+                    : foundExt === "webm" || foundExt === "opus"
+                      ? "audio/webm"
+                      : "audio/mpeg",
                 "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
                 "content-length": fileBuffer.byteLength.toString(),
                 "access-control-allow-origin": "*",
@@ -687,7 +684,10 @@ export default {
         }
 
         // Never substitute another song: if the exact video audio fails, report failure.
-        return Response.json({ error: "Couldn't get audio for this exact video." }, { status: 502, headers: { "access-control-allow-origin": "*" } });
+        return Response.json(
+          { error: "Couldn't get audio for this exact video." },
+          { status: 502, headers: { "access-control-allow-origin": "*" } },
+        );
       }
 
       // Video download path

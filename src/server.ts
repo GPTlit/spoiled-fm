@@ -191,26 +191,14 @@ export default {
     }
 
     if (url.pathname === "/api/video/download" && request.method === "GET") {
-      const rawId = url.searchParams.get("id") || "";
+      const id = url.searchParams.get("id");
       const type = url.searchParams.get("type") || "video"; // "video" | "audio"
       const quality = url.searchParams.get("quality") || (type === "audio" ? "320" : "720");
       const rawTitle = url.searchParams.get("title") || "download";
       const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
 
-      let videoUrl = "";
-      let cleanId = "";
-      if (rawId.startsWith("http://") || rawId.startsWith("https://")) {
-        videoUrl = rawId;
-        const match = rawId.match(/(?:v=|\/embed\/|\/watch\?v=|youtu\.be\/|\/v\/)([\w-]{10,12})/);
-        cleanId = match ? match[1] : "";
-      } else if (/^[\w-]{10,12}$/.test(rawId)) {
-        cleanId = rawId;
-        videoUrl = `https://www.youtube.com/watch?v=${rawId}`;
-      } else if (rawId.trim()) {
-        cleanId = rawId.trim();
-        videoUrl = `https://www.youtube.com/watch?v=${rawId.trim()}`;
-      } else {
-        return new Response(JSON.stringify({ error: "Invalid video ID or URL" }), {
+      if (!id || !/^[\w-]{10,12}$/.test(id)) {
+        return new Response(JSON.stringify({ error: "Invalid video ID" }), {
           status: 400,
           headers: { "content-type": "application/json" },
         });
@@ -223,31 +211,34 @@ export default {
         // ignore
       }
 
+      const videoUrl = `https://www.youtube.com/watch?v=${id}`;
       const timestamp = Date.now();
       const randomSuffix = Math.random().toString(36).substring(2, 8);
-      const basePrefix = `spoiled_${timestamp}_${randomSuffix}`;
 
-      let ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
+      let ext = "mp4";
+      let targetFile = "";
       let args: string[] = [];
 
       const nodePath = process.execPath || "/usr/local/bin/node";
       const commonArgs = [
         "--js-runtimes",
         `node:${nodePath}`,
+        "--extractor-args",
+        "youtube:player_client=android,web",
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",
       ];
 
-      const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
-
       if (type === "audio") {
         if (quality === "128") {
           ext = "m4a";
-          args = [...commonArgs, "-f", "140/ba/b", "-o", templateOutput, videoUrl];
+          targetFile = path.resolve("/tmp", `spoiled_${timestamp}_${randomSuffix}.${ext}`);
+          args = [...commonArgs, "-f", "140/ba/b", "-o", targetFile, videoUrl];
         } else {
           ext = "mp3";
-          const bitrate = quality === "192" ? "192K" : quality === "256" ? "256K" : "320K";
+          targetFile = path.resolve("/tmp", `spoiled_${timestamp}_${randomSuffix}.${ext}`);
+          const bitrate = quality === "192" ? "192K" : "320K";
           args = [
             ...commonArgs,
             "-x",
@@ -256,12 +247,13 @@ export default {
             "--audio-quality",
             bitrate,
             "-o",
-            templateOutput,
+            targetFile,
             videoUrl,
           ];
         }
       } else {
         ext = "mp4";
+        targetFile = path.resolve("/tmp", `spoiled_${timestamp}_${randomSuffix}.${ext}`);
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";
         args = [
           ...commonArgs,
@@ -270,67 +262,52 @@ export default {
           "--merge-output-format",
           "mp4",
           "-o",
-          templateOutput,
+          targetFile,
           videoUrl,
         ];
       }
 
       try {
-        // Run yt-dlp via python3 for 100% portability and permission safety
-        await execFileAsync("python3", [binaryPath, ...args], { timeout: 180000 });
+        await execFileAsync(binaryPath, args, { timeout: 180000 });
 
-        // Locate generated file in /tmp
-        const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
-        const found = tmpFiles.find(
-          (f) => f.startsWith(basePrefix) && (f.endsWith(`.${ext}`) || !f.endsWith(".part")),
-        );
-
-        const actualFile = found ? path.resolve("/tmp", found) : "";
-        if (found) {
-          const foundExt = path.extname(found).replace(".", "");
-          if (foundExt) ext = foundExt;
+        let actualFile = targetFile;
+        if (!fs.existsSync(actualFile)) {
+          const baseName = `spoiled_${timestamp}_${randomSuffix}`;
+          const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
+          const found = tmpFiles.find((f) => f.startsWith(baseName));
+          if (found) {
+            actualFile = path.resolve("/tmp", found);
+            const foundExt = path.extname(found).replace(".", "");
+            if (foundExt) ext = foundExt;
+          }
         }
 
-        if (!actualFile || !fs.existsSync(actualFile)) {
-          // Direct fallback: extract stream URL directly and fetch it
-          const streamFormat = type === "audio" ? "ba/b/140/251" : "18/best";
-          const { stdout } = await execFileAsync(
-            "python3",
-            [binaryPath, ...commonArgs, "-f", streamFormat, "-g", videoUrl],
-            { timeout: 60000 },
-          );
-          const directStreamUrl = stdout.trim().split("\n")[0];
-          if (directStreamUrl && directStreamUrl.startsWith("http")) {
-            const streamRes = await fetch(directStreamUrl, {
-              headers: {
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              },
-            });
-            if (streamRes.ok) {
-              const arrayBuf = await streamRes.arrayBuffer();
-              const contentType =
-                type === "audio"
-                  ? streamRes.headers.get("content-type") || "audio/mpeg"
-                  : "video/mp4";
-              const streamExt = contentType.includes("webm")
-                ? "webm"
-                : contentType.includes("mp4") || contentType.includes("m4a")
-                  ? type === "audio"
-                    ? "m4a"
-                    : "mp4"
-                  : ext;
-              const filename = `${cleanTitle}.${streamExt}`;
-              return new Response(arrayBuf, {
-                headers: {
-                  "content-type": contentType,
-                  "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-                  "content-length": arrayBuf.byteLength.toString(),
-                  "access-control-allow-origin": "*",
-                },
-              });
+        if (!fs.existsSync(actualFile)) {
+          // Fallback attempt: direct format 140/18
+          const fallbackArgs = [
+            ...commonArgs,
+            "-f",
+            type === "audio" ? "140/ba/b/18" : "18/best",
+            "-o",
+            targetFile,
+            videoUrl,
+          ];
+          await execFileAsync(binaryPath, fallbackArgs, { timeout: 90000 });
+          if (!fs.existsSync(targetFile)) {
+            const baseName = `spoiled_${timestamp}_${randomSuffix}`;
+            const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
+            const found = tmpFiles.find((f) => f.startsWith(baseName));
+            if (found) {
+              actualFile = path.resolve("/tmp", found);
+              const foundExt = path.extname(found).replace(".", "");
+              if (foundExt) ext = foundExt;
             }
+          } else {
+            actualFile = targetFile;
           }
+        }
+
+        if (!fs.existsSync(actualFile)) {
           throw new Error("Downloaded file was not created by server");
         }
 
@@ -346,44 +323,35 @@ export default {
             "content-type": contentType,
             "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
             "content-length": fileBuffer.byteLength.toString(),
-            "access-control-allow-origin": "*",
           },
         });
       } catch (err: unknown) {
         console.error("Download error:", err);
-        // Clean up any remnants
-        try {
-          const filesInTmp = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
-          for (const f of filesInTmp) {
-            if (f.startsWith(basePrefix)) {
-              await fs.promises.unlink(path.resolve("/tmp", f)).catch(() => {});
-            }
-          }
-        } catch {
-          // ignore
+        if (targetFile && fs.existsSync(targetFile)) {
+          await fs.promises.unlink(targetFile).catch(() => {});
         }
-
-        const fallbackId = cleanId || rawId;
-        const y2mateUrl = `https://www.y2mate.com/youtube/${fallbackId}`;
-        const tenDownloaderUrl = `https://10downloader.com/download?v=${encodeURIComponent(videoUrl)}`;
-        const cobaltUrl = `https://cobalt.tools/`;
+        const message = err instanceof Error ? err.message : "Download processing failed";
+        const isBotCheck =
+          message.includes("Sign in to confirm you") ||
+          message.includes("bot") ||
+          message.includes("login required");
 
         return new Response(
           JSON.stringify({
-            fallback: true,
-            message: "Direct download fallback engine active",
-            videoId: fallbackId,
-            videoUrl,
-            y2mateUrl,
-            tenDownloaderUrl,
-            cobaltUrl,
+            error: isBotCheck ? "bot_detected" : message,
+            isBotCheck,
+            message: isBotCheck
+              ? "YouTube restricted server download for this track (Bot verification). Use Direct Web Download to save instantly."
+              : message,
+            directLinks: {
+              downloader10: `https://10downloader.com/download?v=${id}`,
+              y2mate: `https://www.y2mate.com/youtube/${id}`,
+              ssyoutube: `https://ssyoutube.com/watch?v=${id}`,
+            },
           }),
           {
-            status: 200,
-            headers: {
-              "content-type": "application/json",
-              "access-control-allow-origin": "*",
-            },
+            status: isBotCheck ? 403 : 500,
+            headers: { "content-type": "application/json" },
           },
         );
       }

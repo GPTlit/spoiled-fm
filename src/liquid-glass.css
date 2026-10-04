@@ -673,70 +673,50 @@
   transition: width 0.15s linear;
 }
 
-/* Solid Opaque White Bottom Navigation Pill Bar (Non-See-Through When Scrolling) */
+/* Floating Bottom Navigation Pill Bar */
 .bottom-nav {
   position: fixed;
-  bottom: 14px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(460px, calc(100vw - 24px));
-  height: 66px;
+  width: min(440px, calc(100vw - 24px));
+  height: 64px;
   border-radius: 9999px;
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  opacity: 1 !important;
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.18), 0 4px 12px -2px rgba(0, 0, 0, 0.08) !important;
-  display: flex !important;
+  background: var(--liquid-glass-elevated);
+  border: 1px solid var(--liquid-glass-border);
+  box-shadow: var(--liquid-shadow-elevated), var(--liquid-specular);
+  backdrop-filter: blur(32px) saturate(190%);
+  -webkit-backdrop-filter: blur(32px) saturate(190%);
+  display: flex;
   align-items: center;
   justify-content: space-around;
-  padding: 6px;
-  z-index: 60;
+  padding: 4px 12px;
+  z-index: 35;
 }
-.bottom-nav button,
-.bottom-nav .nav-white-btn {
+.bottom-nav button {
   flex: 1;
-  height: 100%;
+  height: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  border-radius: 9999px;
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  color: #475569 !important;
-  font-size: 11px;
+  gap: 3px;
+  border-radius: 20px;
+  color: var(--muted-foreground);
+  font-size: 10px;
   font-weight: 600;
-  border: none !important;
-  opacity: 1 !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: none !important;
 }
-.bottom-nav button:hover,
-.bottom-nav .nav-white-btn:hover {
-  background: #f1f5f9 !important;
-  background-color: #f1f5f9 !important;
-  color: #0f172a !important;
+.bottom-nav button:hover {
+  color: var(--foreground);
 }
-.bottom-nav button.active,
-.bottom-nav .nav-white-btn.active {
-  background: #0f172a !important;
-  background-color: #0f172a !important;
-  color: #ffffff !important;
-  font-weight: 750 !important;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.25) !important;
+.bottom-nav button.active {
+  color: var(--foreground);
+  font-weight: 800;
 }
-.bottom-nav button svg,
-.bottom-nav .nav-white-btn svg {
-  width: 19px;
-  height: 19px;
-  stroke-width: 2.2px;
-}
-.bottom-nav button.active svg,
-.bottom-nav .nav-white-btn.active svg {
-  color: #ffffff !important;
-  stroke-width: 2.5px;
+.bottom-nav button svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* Full-Screen Now Playing (`now`) */

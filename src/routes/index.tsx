@@ -47,7 +47,6 @@ import {
   Loader2,
   AlertCircle,
   ShieldCheck,
-  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -266,48 +265,8 @@ function MusicApp() {
     camera: false,
   });
   const [downloads, setDownloads] = useState<{ id: string; title: string; status: string }[]>([]);
-
-  // Track editing & thumbnail state
-  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
-  const [editInfoDraft, setEditInfoDraft] = useState({ title: "", artist: "", album: "" });
-  const [editArtworkPreview, setEditArtworkPreview] = useState<string | null>(null);
-  const [editArtworkBlob, setEditArtworkBlob] = useState<Blob | null>(null);
-  const editArtworkInputRef = useRef<HTMLInputElement>(null);
-  const [deletingTrack, setDeletingTrack] = useState<Track | null>(null);
-
-  // Download History Persistence (for full page Downloads view)
-  interface DownloadHistoryItem {
-    id: string;
-    videoId: string;
-    title: string;
-    channel: string;
-    thumbnail: string;
-    quality: string;
-    type: "audio" | "video";
-    downloadedAt: string;
-    trackId?: string;
-    fallbackUrl?: string;
-  }
-
-  const [downloadHistory, setDownloadHistory] = useState<DownloadHistoryItem[]>(() => {
-    try {
-      const raw =
-        typeof window !== "undefined" ? localStorage.getItem("spoiled-download-history") : null;
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem("spoiled-download-history", JSON.stringify(downloadHistory));
-      }
-    } catch {
-      // ignore
-    }
-  }, [downloadHistory]);
+  const [editInfo, setEditInfo] = useState(false);
+  const [infoDraft, setInfoDraft] = useState({ title: "", artist: "", album: "" });
 
   const [savedReady, setSavedReady] = useState(false);
   const pendingArtwork = useRef<{ previousIds: Set<string>; thumbnail: string } | null>(null);
@@ -705,91 +664,34 @@ function MusicApp() {
     };
 
     setDownloadQueue((prev) => [newTask, ...prev.filter((t) => t.videoId !== video.id)]);
-    setMessage(`Starting download for "${video.title}"...`);
+    setMessage(`Queued "${video.title}" for download`);
 
     const interval = setInterval(() => {
       setDownloadQueue((prev) =>
         prev.map((t) =>
           t.id === taskId && t.status === "downloading"
-            ? { ...t, progress: Math.min(88, t.progress + 12) }
+            ? { ...t, progress: Math.min(85, t.progress + 15) }
             : t,
         ),
       );
-    }, 700);
+    }, 600);
 
     try {
       const url = `/api/video/download?id=${encodeURIComponent(video.id)}&type=${type}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(video.title)}`;
       const res = await fetch(url);
       clearInterval(interval);
 
-      const contentType = res.headers.get("content-type") || "";
-
-      // Seamless Automatic Direct Download Fallback if server returned fallback JSON or non-200
-      if (contentType.includes("application/json") || !res.ok) {
-        let fallbackData: { y2mateUrl?: string; tenDownloaderUrl?: string } = {};
-        try {
-          fallbackData = await res.json();
-        } catch {
-          // ignore
-        }
-
-        const fallbackUrl =
-          type === "audio"
-            ? fallbackData.y2mateUrl || `https://www.y2mate.com/youtube/${video.id}`
-            : fallbackData.tenDownloaderUrl ||
-              `https://10downloader.com/download?v=https://www.youtube.com/watch?v=${video.id}`;
-
-        try {
-          const link = document.createElement("a");
-          link.href = fallbackUrl;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-        } catch {
-          // ignore
-        }
-
-        setDownloadQueue((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
-        );
-        setMessage(`Opening direct ${type} download for "${video.title}"`);
-
-        setDownloadHistory((prev) => [
-          {
-            id: taskId,
-            videoId: video.id,
-            title: video.title,
-            channel: video.channel,
-            thumbnail: video.thumbnail,
-            quality:
-              type === "audio"
-                ? `${quality} kbps MP3 (Direct Engine)`
-                : `${quality}p MP4 (Direct Engine)`,
-            type,
-            downloadedAt: new Date().toLocaleDateString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            fallbackUrl,
-          },
-          ...prev.filter((h) => h.videoId !== video.id),
-        ]);
-        return;
+      if (!res.ok) {
+        throw new Error("Download stream unavailable from server");
       }
 
       setDownloadQueue((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: "saving", progress: 92 } : t)),
+        prev.map((t) => (t.id === taskId ? { ...t, status: "saving", progress: 90 } : t)),
       );
 
       const blob = await res.blob();
       const ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
       const sanitized = video.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
-
-      let addedTrackId = "";
 
       if (type === "audio") {
         let pictureBlob: Blob | undefined;
@@ -811,12 +713,11 @@ function MusicApp() {
           type: ext === "mp3" ? "audio/mpeg" : "audio/mp4",
         });
 
-        const createdTrack = await p.addTrackWithArtwork(file, pictureBlob, {
+        await p.addTrackWithArtwork(file, pictureBlob, {
           title: video.title,
           artist: video.channel,
           album: "SPOILED Downloads",
         });
-        addedTrackId = createdTrack.id;
 
         setDownloadQueue((prev) =>
           prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
@@ -836,79 +737,20 @@ function MusicApp() {
         );
         setMessage(`Video "${video.title}" saved to device!`);
       }
-
-      // Add to persistent download history
-      setDownloadHistory((prev) => [
-        {
-          id: taskId,
-          videoId: video.id,
-          title: video.title,
-          channel: video.channel,
-          thumbnail: video.thumbnail,
-          quality: type === "audio" ? `${quality} kbps ${ext.toUpperCase()}` : `${quality}p MP4`,
-          type,
-          downloadedAt: new Date().toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          trackId: addedTrackId,
-        },
-        ...prev.filter((h) => h.videoId !== video.id),
-      ]);
     } catch (err: unknown) {
       clearInterval(interval);
-      console.error("Direct download fallback engaged:", err);
-
-      const fallbackUrl =
-        type === "audio"
-          ? `https://www.y2mate.com/youtube/${video.id}`
-          : `https://10downloader.com/download?v=https://www.youtube.com/watch?v=${video.id}`;
-
-      try {
-        const link = document.createElement("a");
-        link.href = fallbackUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      } catch {
-        // ignore
-      }
-
+      console.error("Download failed:", err);
+      const errMsg = err instanceof Error ? err.message : "Download failed";
       setDownloadQueue((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
+        prev.map((t) =>
+          t.id === taskId ? { ...t, status: "error", progress: 0, error: errMsg } : t,
+        ),
       );
-      setMessage(`Opening direct download engine for "${video.title}"`);
-
-      setDownloadHistory((prev) => [
-        {
-          id: taskId,
-          videoId: video.id,
-          title: video.title,
-          channel: video.channel,
-          thumbnail: video.thumbnail,
-          quality:
-            type === "audio"
-              ? `${quality} kbps MP3 (Direct Engine)`
-              : `${quality}p MP4 (Direct Engine)`,
-          type,
-          downloadedAt: new Date().toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          fallbackUrl,
-        },
-        ...prev.filter((h) => h.videoId !== video.id),
-      ]);
+      setMessage(`Could not download "${video.title}".`);
     }
   };
 
-  const openDownloadModal = (video: OnlineVideo, defaultType: "video" | "audio" = "audio") => {
+  const openDownloadModal = (video: OnlineVideo, defaultType: "video" | "audio" = "video") => {
     setDownloadModalVideo(video);
     setDownloadType(defaultType);
     setSelectedQuality(defaultType === "audio" ? "320" : "720");
@@ -929,9 +771,8 @@ function MusicApp() {
   const handleSaveToLocalLibrary = async () => {
     if (!downloadModalVideo) return;
     const vid = downloadModalVideo;
-    const q = selectedQuality || "320";
     setDownloadModalOpen(false);
-    void startDownloadTask(vid, "audio", q);
+    void startDownloadTask(vid, "audio", "320");
   };
 
   const playYoutube = (target: string) => {
@@ -1113,29 +954,16 @@ function MusicApp() {
                 <Button
                   variant="ghost"
                   onClick={() => {
-                    setEditingTrack(t);
-                    setEditInfoDraft({
+                    setInfoDraft({
                       title: t.title,
                       artist: t.artist,
                       album: t.album,
                     });
-                    setEditArtworkPreview(t.pictureUrl || null);
-                    setEditArtworkBlob(null);
+                    setEditInfo(true);
                     setMenu(null);
                   }}
                 >
-                  <SlidersHorizontal className="mr-2 h-4 w-4 text-emerald-500" /> Edit name &
-                  thumbnail
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
-                  onClick={() => {
-                    setDeletingTrack(t);
-                    setMenu(null);
-                  }}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" /> Delete from library
+                  <SlidersHorizontal className="mr-2 h-4 w-4" /> Edit song info
                 </Button>
                 <Button
                   variant="ghost"
@@ -1206,17 +1034,7 @@ function MusicApp() {
     );
 
   const activeNav = (
-    [
-      "now",
-      "lyrics",
-      "queue",
-      "album",
-      "playlist",
-      "liked",
-      "search",
-      "settings",
-      "downloads",
-    ] as Screen[]
+    ["now", "lyrics", "queue", "album", "playlist", "liked", "search", "settings"] as Screen[]
   ).includes(screen)
     ? previous
     : screen;
@@ -1321,7 +1139,7 @@ function MusicApp() {
                 <Button
                   key={s}
                   variant="ghost"
-                  className={`nav-sidebar-white-btn ${activeNav === s ? "selected" : ""}`}
+                  className={activeNav === s ? "selected" : ""}
                   onClick={() => go(s)}
                 >
                   <Icon />
@@ -1343,24 +1161,6 @@ function MusicApp() {
               >
                 <Heart />
                 Loved songs
-              </Button>
-              <Button
-                variant="ghost"
-                className={`btn-liquid-glass ${screen === "downloads" ? "selected" : ""}`}
-                onClick={() => go("downloads")}
-              >
-                <Download />
-                <span>Downloads</span>
-                {downloadQueue.filter((d) => d.status === "downloading" || d.status === "saving")
-                  .length > 0 && (
-                  <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold">
-                    {
-                      downloadQueue.filter(
-                        (d) => d.status === "downloading" || d.status === "saving",
-                      ).length
-                    }
-                  </span>
-                )}
               </Button>
             </div>
             <div className="sidebar-bottom">
@@ -1390,8 +1190,8 @@ function MusicApp() {
                     variant="ghost"
                     size="icon"
                     className="glass-icon-btn relative shrink-0"
-                    title="Downloads & offline library"
-                    onClick={() => go("downloads")}
+                    title="Download queue"
+                    onClick={() => setQueueDrawerOpen(true)}
                   >
                     <Download className="h-4 w-4" />
                     {downloadQueue.filter(
@@ -1546,8 +1346,8 @@ function MusicApp() {
                     variant="ghost"
                     size="icon"
                     className="glass-icon-btn relative shrink-0"
-                    title="Downloads & offline library"
-                    onClick={() => go("downloads")}
+                    title="Download queue"
+                    onClick={() => setQueueDrawerOpen(true)}
                   >
                     <Download className="h-4 w-4" />
                     {downloadQueue.filter(
@@ -1717,8 +1517,8 @@ function MusicApp() {
                     variant="ghost"
                     size="icon"
                     className="glass-icon-btn relative shrink-0"
-                    title="Downloads & offline library"
-                    onClick={() => go("downloads")}
+                    title="Download queue"
+                    onClick={() => setQueueDrawerOpen(true)}
                   >
                     <Download className="h-4 w-4" />
                     {downloadQueue.filter(
@@ -1760,11 +1560,7 @@ function MusicApp() {
               {/* Compact VidMate / YouTube Mobile Search Style Rows */}
               <div className="explore-compact-list">
                 {onlineVideos.map((vid) => (
-                  <div
-                    key={vid.id}
-                    className="explore-compact-row cursor-pointer"
-                    onClick={() => openDownloadModal(vid, "audio")}
-                  >
+                  <div key={vid.id} className="explore-compact-row" onClick={() => watchVideo(vid)}>
                     <div className="explore-thumb-wrap">
                       <img src={vid.thumbnail} alt={vid.title} loading="lazy" />
                       {vid.duration && (
@@ -1784,10 +1580,10 @@ function MusicApp() {
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                        title="Choose quality & download"
+                        title="Download audio directly to library"
                         onClick={(e) => {
                           e.stopPropagation();
-                          openDownloadModal(vid, "audio");
+                          void startDownloadTask(vid, "audio", "320");
                         }}
                       >
                         <Download className="h-4 w-4" />
@@ -1824,8 +1620,8 @@ function MusicApp() {
                     variant="ghost"
                     size="icon"
                     className="glass-icon-btn relative shrink-0"
-                    title="Downloads & offline library"
-                    onClick={() => go("downloads")}
+                    title="Download queue"
+                    onClick={() => setQueueDrawerOpen(true)}
                   >
                     <Download className="h-4 w-4" />
                     {downloadQueue.filter(
@@ -1895,9 +1691,9 @@ function MusicApp() {
                       variant="ghost"
                       size="sm"
                       className="text-xs h-7"
-                      onClick={() => go("downloads")}
+                      onClick={() => setQueueDrawerOpen(true)}
                     >
-                      View downloads ({downloadHistory.length + downloadQueue.length})
+                      View queue ({downloadQueue.length})
                     </Button>
                   )}
                 </div>
@@ -1944,9 +1740,9 @@ function MusicApp() {
                         variant="outline"
                         size="sm"
                         className="text-xs mt-1"
-                        onClick={() => go("downloads")}
+                        onClick={() => setQueueDrawerOpen(true)}
                       >
-                        See all downloads & queue ({downloadHistory.length + downloadQueue.length})
+                        See all {downloadQueue.length} items in queue
                       </Button>
                     )}
                   </div>
@@ -2262,17 +2058,12 @@ function MusicApp() {
                   {onlineVideos.length > 0 ? (
                     <div className="video-grid">
                       {onlineVideos.map((vid) => (
-                        <div
-                          key={vid.id}
-                          className="video-card cursor-pointer"
-                          onClick={() => openDownloadModal(vid, "audio")}
-                          title="Click to choose qualities & download song"
-                        >
+                        <div key={vid.id} className="video-card" onClick={() => watchVideo(vid)}>
                           <div className="video-thumb-wrap">
                             <img src={vid.thumbnail} alt={vid.title} />
                             <div className="video-play-overlay">
-                              <div className="video-play-circle" title="Choose download quality">
-                                <Download className="h-6 w-6 text-white" />
+                              <div className="video-play-circle">
+                                <Play className="h-6 w-6 fill-current ml-0.5" />
                               </div>
                             </div>
                             {vid.duration && (
@@ -2286,18 +2077,6 @@ function MusicApp() {
                               {vid.channel} {vid.views ? `· ${vid.views}` : ""}
                             </span>
                             <div className="video-card-actions">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 text-xs font-semibold text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openDownloadModal(vid, "audio");
-                                }}
-                                title="Download with quality options"
-                              >
-                                <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" /> Download
-                              </Button>
                               <button
                                 className="watch-btn"
                                 onClick={(e) => {
@@ -2307,17 +2086,31 @@ function MusicApp() {
                               >
                                 <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
                               </button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  watchVideo(vid, true);
-                                }}
-                                title="Picture-in-Picture Mini Player"
-                              >
-                                <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDownloadModal(vid, "video");
+                                  }}
+                                  title="Download Video or Audio"
+                                >
+                                  <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" />{" "}
+                                  Download
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    watchVideo(vid, true);
+                                  }}
+                                  title="Picture-in-Picture Mini Player"
+                                >
+                                  <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2554,241 +2347,6 @@ function MusicApp() {
                   <Youtube className="h-10 w-10 mx-auto mb-2 text-red-500 opacity-60" />
                   <p className="text-sm font-semibold mb-3">No video currently selected</p>
                   <Button onClick={() => go("explore")}>Explore Online Videos</Button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {screen === "downloads" && (
-            <div className="downloads-page">
-              <header className="page-head">
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn"
-                    onClick={back}
-                    title="Back"
-                  >
-                    <ArrowLeft className="h-5 w-5" />
-                  </Button>
-                  <div>
-                    <p className="eyebrow">OFFLINE AUDIO & MEDIA</p>
-                    <h1 className="flex items-center gap-2">
-                      Downloads
-                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
-                        {downloadHistory.length} saved
-                      </span>
-                    </h1>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {downloadHistory.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs text-muted-foreground hover:text-red-500"
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            "Clear download history list? (Songs remain in your library)",
-                          )
-                        ) {
-                          setDownloadHistory([]);
-                          setMessage("Download history cleared");
-                        }
-                      }}
-                    >
-                      Clear history
-                    </Button>
-                  )}
-                  <Button
-                    className="rounded-full h-9 px-4 text-xs font-semibold"
-                    onClick={() => go("explore")}
-                  >
-                    <Plus className="mr-1 h-3.5 w-3.5" /> Find More
-                  </Button>
-                </div>
-              </header>
-
-              {/* Active / In-Progress Downloads */}
-              {downloadQueue.filter((d) => d.status === "downloading" || d.status === "saving")
-                .length > 0 && (
-                <div className="mb-6 p-4 rounded-3xl bg-emerald-500/10 border border-emerald-500/25">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> In Progress
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {
-                        downloadQueue.filter(
-                          (d) => d.status === "downloading" || d.status === "saving",
-                        ).length
-                      }{" "}
-                      active
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-2.5">
-                    {downloadQueue
-                      .filter((d) => d.status === "downloading" || d.status === "saving")
-                      .map((task) => (
-                        <div key={task.id} className="queue-item-card">
-                          <img src={task.thumbnail} alt="" className="queue-item-thumb" />
-                          <div className="queue-item-info">
-                            <strong className="queue-item-title">{task.title}</strong>
-                            <div className="flex items-center justify-between text-xs text-muted-foreground mt-0.5">
-                              <span>
-                                {task.channel} · {task.quality}
-                                {task.type === "video" ? "p MP4" : "kbps MP3"}
-                              </span>
-                              <span className="text-emerald-500 font-bold">{task.progress}%</span>
-                            </div>
-                            <div className="w-full bg-black/10 dark:bg-white/10 h-1.5 rounded-full overflow-hidden mt-1.5">
-                              <div
-                                className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                                style={{ width: `${task.progress}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Downloaded Songs & Media List */}
-              {downloadHistory.length === 0 && downloadQueue.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-icon-wrapper">
-                    <Download className="h-12 w-12 text-emerald-500/70" />
-                  </div>
-                  <h3>No downloaded songs yet</h3>
-                  <p>
-                    Explore online music and download songs with high fidelity directly to your
-                    device.
-                  </p>
-                  <Button onClick={() => go("explore")}>
-                    <Compass className="mr-1.5 h-4 w-4" />
-                    Explore Songs to Download
-                  </Button>
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-bold">Downloaded Audio & Video</h2>
-                      <span className="text-xs text-muted-foreground">
-                        ({downloadHistory.length})
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => go("explore")}
-                    >
-                      <Search className="h-3.5 w-3.5 mr-1" /> Search new songs
-                    </Button>
-                  </div>
-
-                  <div className="flex flex-col gap-2.5">
-                    {downloadHistory.map((item) => {
-                      const libraryTrack = p.library.find(
-                        (t) =>
-                          t.id === item.trackId ||
-                          t.title.toLowerCase().trim() === item.title.toLowerCase().trim(),
-                      );
-                      return (
-                        <div key={item.id} className="download-full-card">
-                          <div className="download-full-thumb">
-                            <img src={libraryTrack?.pictureUrl || item.thumbnail} alt="" />
-                          </div>
-                          <div className="download-full-info">
-                            <strong className="download-full-title">
-                              {libraryTrack?.title || item.title}
-                            </strong>
-                            <span className="download-full-channel">
-                              {libraryTrack?.artist || item.channel}
-                            </span>
-                            <div className="download-full-meta">
-                              <span className="download-quality-pill">{item.quality}</span>
-                              <span className="download-date">{item.downloadedAt}</span>
-                              {libraryTrack && (
-                                <span className="download-status-badge">
-                                  <Check className="h-3 w-3 inline mr-0.5" /> In Library
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="download-full-actions">
-                            {libraryTrack && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15"
-                                title="Play song"
-                                onClick={() => p.playTrack(libraryTrack.id)}
-                              >
-                                <Play className="h-4 w-4 fill-current ml-0.5" />
-                              </Button>
-                            )}
-                            {libraryTrack && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                                title="Edit song name and thumbnail"
-                                onClick={() => {
-                                  setEditingTrack(libraryTrack);
-                                  setEditInfoDraft({
-                                    title: libraryTrack.title,
-                                    artist: libraryTrack.artist,
-                                    album: libraryTrack.album,
-                                  });
-                                  setEditArtworkPreview(libraryTrack.pictureUrl || null);
-                                  setEditArtworkBlob(null);
-                                }}
-                              >
-                                <SlidersHorizontal className="h-4 w-4" />
-                              </Button>
-                            )}
-                            <a
-                              href={
-                                item.fallbackUrl ||
-                                (item.type === "audio"
-                                  ? `https://www.y2mate.com/youtube/${item.videoId}`
-                                  : `https://10downloader.com/download?v=https://www.youtube.com/watch?v=${item.videoId}`)
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="h-9 w-9 inline-flex items-center justify-center text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
-                              title="Open direct download engine (y2mate / 10downloader)"
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                            </a>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
-                              title="Delete song"
-                              onClick={() => {
-                                if (libraryTrack) {
-                                  setDeletingTrack(libraryTrack);
-                                } else {
-                                  setDownloadHistory((prev) =>
-                                    prev.filter((h) => h.id !== item.id),
-                                  );
-                                  setMessage(`Removed "${item.title}" from downloads`);
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               )}
             </div>
@@ -3243,19 +2801,16 @@ function MusicApp() {
                     <Button
                       variant="ghost"
                       onClick={() => {
-                        if (!p.current) return;
-                        setEditingTrack(p.current);
-                        setEditInfoDraft({
-                          title: p.current.title,
-                          artist: p.current.artist,
-                          album: p.current.album,
+                        setInfoDraft({
+                          title: p.current?.title ?? "",
+                          artist: p.current?.artist ?? "",
+                          album: p.current?.album ?? "",
                         });
-                        setEditArtworkPreview(p.current.pictureUrl || null);
-                        setEditArtworkBlob(null);
+                        setEditInfo(true);
                       }}
                       disabled={!p.current}
                     >
-                      <SlidersHorizontal className="mr-1 h-4 w-4" /> Info & Artwork
+                      <SlidersHorizontal className="mr-1 h-4 w-4" /> Info
                     </Button>
                   </div>
                 </>
@@ -3313,215 +2868,63 @@ function MusicApp() {
         </div>
       )}
 
-      {editingTrack && (
-        <div className="download-sheet-backdrop" onClick={() => setEditingTrack(null)}>
+      {editInfo && p.current && (
+        <div className="download-sheet-backdrop" onClick={() => setEditInfo(false)}>
           <form
             className="download-sheet info-sheet"
             onClick={(e) => e.stopPropagation()}
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              if (!editingTrack) return;
-              const newTitle = editInfoDraft.title.trim() || editingTrack.title;
-              const newArtist = editInfoDraft.artist.trim() || editingTrack.artist;
-              const newAlbum = editInfoDraft.album.trim() || editingTrack.album;
-
-              await p.updateTrackInfo(editingTrack.id, {
-                title: newTitle,
-                artist: newArtist,
-                album: newAlbum,
-              });
-
-              if (editArtworkBlob) {
-                await p.setTrackArtwork(editingTrack.id, editArtworkBlob);
-              }
-
-              // Update in downloadHistory if present
-              setDownloadHistory((prev) =>
-                prev.map((h) =>
-                  h.trackId === editingTrack.id
-                    ? {
-                        ...h,
-                        title: newTitle,
-                        channel: newArtist,
-                        thumbnail: editArtworkPreview || h.thumbnail,
-                      }
-                    : h,
-                ),
-              );
-
-              setEditingTrack(null);
-              setEditArtworkBlob(null);
-              setEditArtworkPreview(null);
-              setMessage(`Updated "${newTitle}"`);
+              if (!p.current) return;
+              void p
+                .updateTrackInfo(p.current.id, {
+                  title: infoDraft.title.trim() || p.current.title,
+                  artist: infoDraft.artist.trim() || p.current.artist,
+                  album: infoDraft.album.trim() || p.current.album,
+                })
+                .then(() => {
+                  setEditInfo(false);
+                  setMessage("Song info saved");
+                });
             }}
           >
             <div className="download-sheet-header">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal className="text-emerald-500 h-5 w-5" />
-                <h3 className="text-base font-bold">Edit Song & Thumbnail</h3>
-              </div>
+              <h3>Song info</h3>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => setEditingTrack(null)}
+                onClick={() => setEditInfo(false)}
                 title="Close"
               >
-                <X className="h-4 w-4" />
+                <X />
               </Button>
             </div>
-
             <div className="info-fields">
-              {/* Thumbnail Preview and Upload Button */}
-              <div className="flex items-center gap-4 p-3 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 mb-2">
-                <div className="relative w-16 h-16 rounded-xl overflow-hidden shadow-md shrink-0 bg-muted">
-                  <img
-                    src={editArtworkPreview || coverFor(editingTrack.album)}
-                    alt="Artwork preview"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <strong className="block text-sm font-semibold truncate mb-0.5">
-                    Song Thumbnail
-                  </strong>
-                  <p className="text-xs text-muted-foreground mb-2">Upload a custom cover image</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs font-semibold"
-                    onClick={() => editArtworkInputRef.current?.click()}
-                  >
-                    <Upload className="mr-1.5 h-3.5 w-3.5" /> Change Thumbnail
-                  </Button>
-                  <input
-                    ref={editArtworkInputRef}
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setEditArtworkBlob(file);
-                        setEditArtworkPreview(URL.createObjectURL(file));
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-
               <label>
                 Title
                 <input
-                  value={editInfoDraft.title}
-                  onChange={(e) => setEditInfoDraft({ ...editInfoDraft, title: e.target.value })}
-                  placeholder="Song Title"
-                  required
+                  value={infoDraft.title}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, title: e.target.value })}
                 />
               </label>
               <label>
                 Artist
                 <input
-                  value={editInfoDraft.artist}
-                  onChange={(e) => setEditInfoDraft({ ...editInfoDraft, artist: e.target.value })}
-                  placeholder="Artist"
-                  required
+                  value={infoDraft.artist}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, artist: e.target.value })}
                 />
               </label>
               <label>
                 Album
                 <input
-                  value={editInfoDraft.album}
-                  onChange={(e) => setEditInfoDraft({ ...editInfoDraft, album: e.target.value })}
-                  placeholder="Album"
+                  value={infoDraft.album}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, album: e.target.value })}
                 />
               </label>
-
-              <div className="flex gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1 h-11"
-                  onClick={() => setEditingTrack(null)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" className="download-cta-btn flex-1 h-11 font-semibold">
-                  Save Changes
-                </Button>
-              </div>
+              <Button type="submit">Save</Button>
             </div>
           </form>
-        </div>
-      )}
-
-      {/* Delete Song Confirmation Modal */}
-      {deletingTrack && (
-        <div className="download-sheet-backdrop" onClick={() => setDeletingTrack(null)}>
-          <div className="download-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="download-sheet-header">
-              <div className="flex items-center gap-2 text-red-500">
-                <Trash2 className="h-5 w-5" />
-                <h3 className="text-base font-bold">Delete from Library</h3>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setDeletingTrack(null)}
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="download-sheet-body">
-              <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/20 mb-4">
-                <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0">
-                  <Art track={deletingTrack} className="w-full h-full object-cover" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <strong className="block text-sm truncate">{deletingTrack.title}</strong>
-                  <span className="text-xs text-muted-foreground truncate block">
-                    {deletingTrack.artist}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-sm text-foreground mb-1 font-semibold">
-                Delete "{deletingTrack.title}" from your library?
-              </p>
-              <p className="text-xs text-muted-foreground mb-5 leading-relaxed">
-                This will permanently remove the song and its audio data from your device storage.
-              </p>
-
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1 h-11"
-                  onClick={() => setDeletingTrack(null)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-semibold"
-                  onClick={async () => {
-                    const trackId = deletingTrack.id;
-                    const songTitle = deletingTrack.title;
-                    await p.removeTrack(trackId);
-                    setDownloadHistory((prev) => prev.filter((h) => h.trackId !== trackId));
-                    setDeletingTrack(null);
-                    setMessage(`Deleted "${songTitle}" from library`);
-                  }}
-                >
-                  <Trash2 className="mr-1.5 h-4 w-4" /> Delete Song
-                </Button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -3648,12 +3051,6 @@ function MusicApp() {
                         ext: "MP3",
                       },
                       {
-                        q: "256",
-                        label: "256 kbps MP3",
-                        badge: "High Bitrate (Ultra Clean Audio)",
-                        ext: "MP3",
-                      },
-                      {
                         q: "192",
                         label: "192 kbps MP3",
                         badge: "Standard Quality (Clear & Crisp)",
@@ -3700,6 +3097,7 @@ function MusicApp() {
                 </div>
               )}
 
+              {/* Direct Fast Downloader Active Info */}
               {/* Download Buttons */}
               <div className="flex flex-col gap-2.5 pt-2">
                 <Button
@@ -3732,43 +3130,6 @@ function MusicApp() {
                     Save Track Directly to SPOILED Local Music Library
                   </Button>
                 )}
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-center text-xs h-9 text-muted-foreground hover:text-foreground"
-                  disabled={downloadInProgress}
-                  onClick={() => {
-                    setDownloadModalOpen(false);
-                    watchVideo(downloadModalVideo);
-                  }}
-                >
-                  <Play className="mr-1.5 h-3.5 w-3.5" /> Watch on YouTube / Online Player
-                </Button>
-
-                <div className="pt-2.5 mt-1 border-t border-white/30 dark:border-white/10 flex flex-col gap-1.5">
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
-                    Fast Direct Download Engines
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <a
-                      href={`https://www.y2mate.com/youtube/${downloadModalVideo.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-2 rounded-xl text-xs font-semibold text-center bg-white/40 dark:bg-white/10 border border-white/50 hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/40 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <Download className="h-3.5 w-3.5 text-emerald-500" /> y2mate MP3
-                    </a>
-                    <a
-                      href={`https://10downloader.com/download?v=https://www.youtube.com/watch?v=${downloadModalVideo.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-2 rounded-xl text-xs font-semibold text-center bg-white/40 dark:bg-white/10 border border-white/50 hover:bg-emerald-500/10 hover:text-emerald-500 hover:border-emerald-500/40 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <Film className="h-3.5 w-3.5 text-blue-500" /> 10downloader
-                    </a>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -4077,7 +3438,7 @@ function MusicApp() {
                     if (topMatch) {
                       setDirectDownloadOpen(false);
                       setDirectDownloadQuery("");
-                      openDownloadModal(topMatch, "audio");
+                      void startDownloadTask(topMatch, "audio", "320");
                     } else {
                       setMessage("No matches found for that song query");
                     }
@@ -4140,7 +3501,7 @@ function MusicApp() {
                           );
                           const data = await res.json();
                           if (data.videos?.[0]) {
-                            openDownloadModal(data.videos[0], "audio");
+                            void startDownloadTask(data.videos[0], "audio", "320");
                           }
                         } catch {
                           /* ignore */
@@ -4157,33 +3518,6 @@ function MusicApp() {
         </div>
       )}
 
-      {/* Floating Active Download Queue Indicator */}
-      {downloadQueue.filter((d) => d.status === "downloading" || d.status === "saving").length >
-        0 &&
-        !["now", "lyrics", "queue", "downloads"].includes(screen) && (
-          <div
-            className="fixed bottom-[84px] left-1/2 -translate-x-1/2 z-50 cursor-pointer flex items-center gap-2.5 px-4 py-2 rounded-full bg-emerald-600 text-white shadow-xl border border-emerald-400/40 text-xs font-semibold hover:bg-emerald-700 transition-all"
-            onClick={() => go("downloads")}
-            title="Open full downloads page"
-          >
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            <span className="truncate max-w-[200px]">
-              Downloading:{" "}
-              {
-                downloadQueue.find((d) => d.status === "downloading" || d.status === "saving")
-                  ?.title
-              }
-            </span>
-            <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] shrink-0 font-bold">
-              {
-                downloadQueue.find((d) => d.status === "downloading" || d.status === "saving")
-                  ?.progress
-              }
-              % · View Queue
-            </span>
-          </div>
-        )}
-
       {/* Mobile Bottom Navigation (Home, Library, Explore, Profile) */}
       {!["now", "lyrics", "queue"].includes(screen) && (
         <nav className="bottom-nav" aria-label="Main navigation">
@@ -4192,7 +3526,7 @@ function MusicApp() {
               variant="ghost"
               key={s}
               onClick={() => go(s)}
-              className={`nav-white-btn ${activeNav === s ? "active" : ""}`}
+              className={activeNav === s ? "active" : ""}
             >
               <Icon />
               <span>{label}</span>

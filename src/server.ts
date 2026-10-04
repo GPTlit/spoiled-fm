@@ -625,31 +625,9 @@ export default {
         const fallbackPath = path.resolve("/tmp", `${basePrefix}_audio.mp3`);
         const bitrate = quality === "192" ? "192K" : quality === "256" ? "256K" : "320K";
 
-        // Try Archive audio first for speed and reliable bot-free delivery
-        const archiveSuccess = await fetchAudioFromArchive(
-          cleanTitle,
-          artist,
-          fallbackPath,
-          bitrate,
-        );
-
-        if (archiveSuccess && fs.existsSync(fallbackPath)) {
-          const fileBuffer = await fs.promises.readFile(fallbackPath);
-          await fs.promises.unlink(fallbackPath).catch(() => {});
-          const filename = `${cleanTitle}.mp3`;
-          return new Response(fileBuffer, {
-            headers: {
-              "content-type": "audio/mpeg",
-              "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-              "content-length": fileBuffer.byteLength.toString(),
-              "access-control-allow-origin": "*",
-            },
-          });
-        }
-
         // Try yt-dlp silently with short timeout
         try {
-          await execFileAsync("python3", [binaryPath, ...args], { timeout: 4000 });
+          await execFileAsync("python3", [binaryPath, ...args], { timeout: 90000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
           const found = tmpFiles.find(
             (f) => f.startsWith(basePrefix) && (f.endsWith(".mp3") || f.endsWith(".m4a")),
@@ -685,21 +663,8 @@ export default {
           // ignore
         }
 
-        // Produce high-fidelity real studio audio track from our music pool with ID3 tags
-        await produceRealAudioTrack(fallbackPath, cleanTitle, artist, bitrate);
-        if (fs.existsSync(fallbackPath)) {
-          const fileBuffer = await fs.promises.readFile(fallbackPath);
-          await fs.promises.unlink(fallbackPath).catch(() => {});
-          const filename = `${cleanTitle}.mp3`;
-          return new Response(fileBuffer, {
-            headers: {
-              "content-type": "audio/mpeg",
-              "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-              "content-length": fileBuffer.byteLength.toString(),
-              "access-control-allow-origin": "*",
-            },
-          });
-        }
+        // Never substitute another song: if the exact video audio fails, report failure.
+        return Response.json({ error: "Couldn't get audio for this exact video." }, { status: 502, headers: { "access-control-allow-origin": "*" } });
       }
 
       // Video download path

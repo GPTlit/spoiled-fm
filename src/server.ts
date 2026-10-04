@@ -603,24 +603,9 @@ export default {
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
       if (type === "audio") {
-        if (quality === "128") {
-          ext = "m4a";
-          args = [...commonArgs, "-f", "140/ba/b", "-o", templateOutput, videoUrl];
-        } else {
-          ext = "mp3";
-          const bitrate = quality === "192" ? "192K" : quality === "256" ? "256K" : "320K";
-          args = [
-            ...commonArgs,
-            "-x",
-            "--audio-format",
-            "mp3",
-            "--audio-quality",
-            bitrate,
-            "-o",
-            templateOutput,
-            videoUrl,
-          ];
-        }
+        // Native AAC stream (itag 140) needs no ffmpeg transcoding, so audio is never silent.
+        ext = "m4a";
+        args = [...commonArgs, "-f", "140/bestaudio[ext=m4a]/bestaudio", "-o", templateOutput, videoUrl];
       } else {
         ext = "mp4";
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";

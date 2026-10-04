@@ -1172,9 +1172,9 @@
 .row-menu {
   position: absolute;
   right: 12px;
-  top: 56px;
+  top: calc(100% - 8px);
   min-width: 200px;
-  z-index: 30;
+  z-index: 60;
   padding: 8px;
   background: var(--popover);
   backdrop-filter: var(--liquid-glass-blur);
@@ -4868,3 +4868,10 @@ body,
   gap: 6px;
   flex: none;
 }
+
+/* Row menus must float above neighbouring rows */
+.track-row { overflow: visible !important; }
+.track-row:has(.row-menu) { z-index: 50; }
+.track-main, .track-copy { overflow: hidden; }
+/* In-app notch island is hidden; background playback uses system Media Session controls */
+.android-notch-island { display: none !important; }

@@ -595,7 +595,16 @@ export default {
       const commonArgs = [
         "--js-runtimes",
         `node:${nodePath}`,
-
+        // YouTube increasingly gates the web client. Try public, non-login
+        // clients so downloads do not depend on browser cookies or a session.
+        "--extractor-args",
+        "youtube:player_client=android,tv,web_safari,mweb",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--retry-sleep",
+        "1",
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",

@@ -605,15 +605,14 @@ export default {
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
       if (type === "audio") {
-        // Native AAC stream (itag 140) needs no ffmpeg transcoding, so audio is never silent.
-        // Prefer a standalone audio stream so the exact video can be downloaded
-        // without requiring a video merge. Keep webm as a valid fallback because
-        // many current YouTube videos no longer expose the legacy AAC stream.
+        // Select the best audio-only stream when YouTube exposes one, then fall
+        // back to the best combined stream. This keeps the exact requested video
+        // instead of failing on videos that do not expose AAC/m4a.
         ext = "m4a";
         args = [
           ...commonArgs,
           "-f",
-          "best",
+          "bestaudio/best",
           "-o",
           templateOutput,
           videoUrl,

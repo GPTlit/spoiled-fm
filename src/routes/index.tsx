@@ -66,7 +66,12 @@ import {
 import spoiledLiquidLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
 import auroraBanner from "@/assets/images/aurora_glass_banner_1790935692854.jpg";
 import featured from "@/assets/better-days.jpg";
+import afterHours from "@/assets/after-hours.jpg";
+import dawn from "@/assets/dawn-fm.jpg";
+import tranquility from "@/assets/tranquility.jpg";
+import ocean from "@/assets/ocean.jpg";
 import night from "@/assets/night.jpg";
+import sunflower from "@/assets/sunflower.jpg";
 import Threads from "@/components/Threads";
 import { parseLrc, findCurrentLrcIndex, type LrcLine } from "@/lib/lyrics";
 
@@ -89,8 +94,9 @@ type Screen =
 
 type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
 
-// Songs without embedded artwork show the SPOILED mark, never stock photos.
-const coverFor = (_name: string) => spoiledLiquidLogo;
+const covers = [afterHours, dawn, tranquility, ocean, night, sunflower];
+const coverFor = (name: string) =>
+  covers[Math.abs([...name].reduce((n, c) => n + c.charCodeAt(0), 0)) % covers.length];
 
 // 4 Primary navigation tabs with Profile in place of AI
 const nav: { screen: Screen; label: string; icon: typeof Home }[] = [
@@ -126,7 +132,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
-  const imgSrc = track?.pictureUrl || spoiledLiquidLogo;
+  const imgSrc = track?.pictureUrl || (track ? coverFor(track.album) : spoiledLiquidLogo);
   return (
     <div className={`art ${className}`}>
       <img src={imgSrc} alt={track ? `${track.album} artwork` : "SPOILED"} />
@@ -748,14 +754,8 @@ function MusicApp() {
       );
 
       const blob = await res.blob();
-      const mime = (res.headers.get("content-type") || blob.type || "").toLowerCase();
-      if (!/^(audio|video)\//.test(mime) || blob.size < 10000) {
-        throw new Error("The server didn't return a playable file.");
-      }
-      const isM4a = mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac");
-      const ext = type === "audio" ? (isM4a ? "m4a" : "mp3") : "mp4";
+      const ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
       const sanitized = video.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
-      void exportFile;
 
       let addedTrackId = "";
 
@@ -763,11 +763,10 @@ function MusicApp() {
         let pictureBlob: Blob | undefined;
         try {
           const imgRes = await fetch(`/api/proxy-image?url=${encodeURIComponent(video.thumbnail)}`);
-          if (imgRes.ok) pictureBlob = await imgRes.blob();
+          if (imgRes.ok) {
+            pictureBlob = await imgRes.blob();
+          }
         } catch {
-          /* ignore */
-        }
-        if (!pictureBlob) {
           try {
             const direct = await fetch(video.thumbnail);
             if (direct.ok) pictureBlob = await direct.blob();
@@ -787,23 +786,33 @@ function MusicApp() {
         });
         addedTrackId = createdTrack.id;
 
+        if (exportFile) {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = `${sanitized}.${ext}`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+        }
+
         setDownloadQueue((prev) =>
           prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
         );
-        setMessage(`Saved "${video.title}" to your library.`);
+        setMessage(`Saved "${video.title}" directly to your library!`);
       } else {
-        // Videos stay inside the app too: keep the audio track in the library, no browser download.
-        const file = new File([blob], `${sanitized}.mp4`, { type: "video/mp4" });
-        const createdTrack = await p.addTrackWithArtwork(file, undefined, {
-          title: video.title,
-          artist: video.channel,
-          album: "SPOILED Downloads",
-        });
-        addedTrackId = createdTrack.id;
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `${sanitized}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+
         setDownloadQueue((prev) =>
           prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
         );
-        setMessage(`Saved "${video.title}" to your library.`);
+        setMessage(`Video "${video.title}" saved to device!`);
       }
 
       // Add to persistent download history

@@ -119,7 +119,7 @@ void main() {
 }
 `;
 
-export interface ThreadsProps extends Omit<HTMLAttributes<HTMLDivElement>, 'color'> {
+export interface ThreadsProps extends HTMLAttributes<HTMLDivElement> {
   color?: [number, number, number];
   amplitude?: number;
   distance?: number;

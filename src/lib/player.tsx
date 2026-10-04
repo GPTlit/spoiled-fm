@@ -92,7 +92,6 @@ interface Ctx {
   duration: number;
   volume: number;
   crossfade: number;
-  mixMode: "crossfade" | "automix";
   shuffle: boolean;
   repeat: boolean;
   current: Track | undefined;
@@ -108,9 +107,6 @@ interface Ctx {
   seek: (t: number) => void;
   setVolume: (v: number) => void;
   setCrossfade: (v: number) => void;
-  setMixMode: (v: "crossfade" | "automix") => void;
-  updateTrackInfo: (id: string, changes: Pick<Track, "title" | "artist" | "album">) => Promise<void>;
-  setTrackArtwork: (id: string, pictureBlob: Blob) => Promise<void>;
   setShuffle: (v: boolean) => void;
   setRepeat: (v: boolean) => void;
   enqueue: (id: string) => void;
@@ -139,7 +135,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeS] = useState(0.85);
   const [crossfade, setCrossfade] = useState(4);
-  const [mixMode, setMixMode] = useState<"crossfade" | "automix">("crossfade");
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
 
@@ -150,14 +145,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const decks = useRef<HTMLAudioElement[]>([]);
   const active = useRef(0);
   const fading = useRef(false);
-  const fadeFrame = useRef<number | null>(null);
 
   // Web Audio Context & Biquad Filter Chains
   const audioCtxRef = useRef<AudioContext | null>(null);
   const filterChainsRef = useRef<BiquadFilterNode[][]>([]);
 
-  const stateRef = useRef({ queue, index, library, crossfade, mixMode, repeat, volume, eqGains });
-  stateRef.current = { queue, index, library, crossfade, mixMode, repeat, volume, eqGains };
+  const stateRef = useRef({ queue, index, library, crossfade, repeat, volume, eqGains });
+  stateRef.current = { queue, index, library, crossfade, repeat, volume, eqGains };
 
   const current = library.find((t) => t.id === queue[index]);
 
@@ -289,7 +283,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadOnDeck = useCallback(
-    (track: Track, fadeSeconds: number) => {
+    (track: Track, fade: boolean) => {
       initAudioNodes();
       if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
         void audioCtxRef.current.resume();
@@ -297,40 +291,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       const d = decks.current;
       if (!d.length) return;
-      if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
-      fadeFrame.current = null;
-      fading.current = false;
       const from = d[active.current]!;
-      const shouldFade = fadeSeconds > 0 && !from.paused;
-      const toIdx = shouldFade ? 1 - active.current : active.current;
+      const toIdx = fade ? 1 - active.current : active.current;
       const to = d[toIdx]!;
       to.src = track.url;
       const vol = stateRef.current.volume;
 
-      if (shouldFade) {
+      if (fade && !from.paused) {
         fading.current = true;
         to.volume = 0;
-        void to.play().catch(() => {
-          from.pause();
-          fading.current = false;
-        });
-        const ms = Math.max(250, Math.min(fadeSeconds, from.duration - from.currentTime || fadeSeconds) * 1000);
+        void to.play().catch(() => {});
+        const ms = stateRef.current.crossfade * 1000;
         const start = performance.now();
         const step = (now: number) => {
-          if (!fading.current) return;
           const p = Math.min(1, (now - start) / ms);
           to.volume = vol * Math.sin((p * Math.PI) / 2);
           from.volume = vol * Math.cos((p * Math.PI) / 2);
           if (p < 1) {
-            fadeFrame.current = requestAnimationFrame(step);
+            requestAnimationFrame(step);
           } else {
             from.pause();
             from.volume = vol;
             fading.current = false;
-            fadeFrame.current = null;
           }
         };
-        fadeFrame.current = requestAnimationFrame(step);
+        requestAnimationFrame(step);
         active.current = toIdx;
       } else {
         d.forEach((a, i) => i !== toIdx && a.pause());
@@ -344,7 +329,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const goTo = useCallback(
-    (i: number, fadeSeconds = 0) => {
+    (i: number, fade = false) => {
       const { queue, library, repeat } = stateRef.current;
       let n = i;
       if (n >= queue.length) {
@@ -359,7 +344,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const t = library.find((x) => x.id === queue[n]);
       if (!t) return;
       setIndex(n);
-      loadOnDeck(t, fadeSeconds);
+      loadOnDeck(t, fade);
     },
     [loadOnDeck],
   );
@@ -376,17 +361,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
-      const { crossfade, mixMode, index } = stateRef.current;
-      const transition = mixMode === "automix" ? Math.min(6, Math.max(1.5, a.duration * 0.06)) : crossfade;
+      const { crossfade, index } = stateRef.current;
       if (
         !fading.current &&
         !a.paused &&
         a.duration &&
-        transition > 0 &&
-        a.duration - a.currentTime <= transition &&
+        crossfade > 0 &&
+        a.duration - a.currentTime <= crossfade &&
         (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)
       ) {
-        goTo(index + 1, transition);
+        goTo(index + 1, true);
       }
     };
 
@@ -402,7 +386,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
-      if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
       decks.current.forEach((a) => a.pause());
     };
   }, [goTo]);
@@ -580,35 +563,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateTrackInfo = async (id: string, changes: Pick<Track, "title" | "artist" | "album">) => {
-    const db = await openLibrary();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("tracks", "readwrite");
-      const store = tx.objectStore("tracks");
-      const request = store.get(id);
-      request.onsuccess = () => { if (request.result) store.put({ ...request.result, ...changes }); };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-    setLibrary((tracks) => tracks.map((track) => track.id === id ? { ...track, ...changes } : track));
-  };
-
-  const setTrackArtwork = async (id: string, pictureBlob: Blob) => {
-    const db = await openLibrary();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("tracks", "readwrite");
-      const store = tx.objectStore("tracks");
-      const request = store.get(id);
-      request.onsuccess = () => { if (request.result) store.put({ ...request.result, pictureBlob }); };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-    const pictureUrl = URL.createObjectURL(pictureBlob);
-    setLibrary((tracks) => tracks.map((track) => track.id === id ? { ...track, pictureUrl, hasEmbeddedPicture: true } : track));
-  };
-
   return (
     <PlayerCtx.Provider
       value={{
@@ -620,7 +574,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         duration,
         volume,
         crossfade,
-        mixMode,
         shuffle,
         repeat,
         current,
@@ -631,7 +584,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         addFiles,
         playTrack,
         toggle,
-        next: () => goTo(index + 1, mixMode === "automix" ? Math.min(6, Math.max(1.5, (duration || 60) * 0.06)) : crossfade),
+        next: () => goTo(index + 1, crossfade > 0),
         prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
         seek: (t) => {
           const a = decks.current[active.current];
@@ -639,12 +592,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         },
         setVolume: (v) => {
           setVolumeS(v);
-            if (!fading.current) decks.current.forEach((a) => (a.volume = v));
+          decks.current.forEach((a) => (a.volume = v));
         },
         setCrossfade,
-        setMixMode,
-        updateTrackInfo,
-        setTrackArtwork,
         setShuffle,
         setRepeat,
         enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),

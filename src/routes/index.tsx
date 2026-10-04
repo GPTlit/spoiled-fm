@@ -66,12 +66,7 @@ import {
 import spoiledLiquidLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
 import auroraBanner from "@/assets/images/aurora_glass_banner_1790935692854.jpg";
 import featured from "@/assets/better-days.jpg";
-import afterHours from "@/assets/after-hours.jpg";
-import dawn from "@/assets/dawn-fm.jpg";
-import tranquility from "@/assets/tranquility.jpg";
-import ocean from "@/assets/ocean.jpg";
 import night from "@/assets/night.jpg";
-import sunflower from "@/assets/sunflower.jpg";
 import Threads from "@/components/Threads";
 import { parseLrc, findCurrentLrcIndex, type LrcLine } from "@/lib/lyrics";
 
@@ -94,9 +89,8 @@ type Screen =
 
 type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
 
-const covers = [afterHours, dawn, tranquility, ocean, night, sunflower];
-const coverFor = (name: string) =>
-  covers[Math.abs([...name].reduce((n, c) => n + c.charCodeAt(0), 0)) % covers.length];
+// Songs without embedded artwork show the SPOILED mark, never stock photos.
+const coverFor = (_name: string) => spoiledLiquidLogo;
 
 // 4 Primary navigation tabs with Profile in place of AI
 const nav: { screen: Screen; label: string; icon: typeof Home }[] = [
@@ -132,7 +126,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
-  const imgSrc = track?.pictureUrl || (track ? coverFor(track.album) : spoiledLiquidLogo);
+  const imgSrc = track?.pictureUrl || spoiledLiquidLogo;
   return (
     <div className={`art ${className}`}>
       <img src={imgSrc} alt={track ? `${track.album} artwork` : "SPOILED"} />

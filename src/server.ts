@@ -596,7 +596,7 @@ export default {
         "--js-runtimes",
         `node:${nodePath}`,
         "--extractor-args",
-        "youtube:player_client=web_creator,web",
+        "youtube:player_client=android,ios,tv_embedded,web_creator,web",
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",
@@ -614,7 +614,7 @@ export default {
         args = [
           ...commonArgs,
           "-f",
-          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
           "-o",
           templateOutput,
           videoUrl,
@@ -640,7 +640,7 @@ export default {
 
         // Try yt-dlp silently with short timeout
         try {
-          await execFileAsync("python3", [binaryPath, ...args], { timeout: 90000 });
+          await execFileAsync(binaryPath, args, { timeout: 120000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
           const found = tmpFiles.find(
             (f) =>
@@ -684,7 +684,7 @@ export default {
 
       // Video download path
       try {
-        await execFileAsync("python3", [binaryPath, ...args], { timeout: 60000 });
+        await execFileAsync(binaryPath, args, { timeout: 120000 });
         const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
         const found = tmpFiles.find((f) => f.startsWith(basePrefix) && f.endsWith(".mp4"));
         const actualFile = found ? path.resolve("/tmp", found) : "";

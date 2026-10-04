@@ -2,6 +2,7 @@ import "./lib/error-capture";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
+import { Readable } from "node:stream";
 import { promisify } from "node:util";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
@@ -591,12 +592,14 @@ export default {
       let ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
       let args: string[] = [];
 
-      // Keep extraction independent of browser cookies. The Android client
-      // exposes a public progressive format that avoids the sign-in wall and
-      // the 403 media URLs returned by some server-side clients.
+      // YouTube currently rejects the Android client in this server environment
+      // with a sign-in challenge. web_safari exposes the same public media
+      // formats without requiring browser cookies and was verified end-to-end.
       const commonArgs = [
+        "--js-runtimes",
+        "node:/usr/local/bin/node",
         "--extractor-args",
-        "youtube:player_client=android",
+        "youtube:player_client=web_safari",
         "--force-ipv4",
         "--retries",
         "3",
@@ -608,13 +611,21 @@ export default {
         "--geo-bypass",
         "--no-playlist",
         "--no-warnings",
+        "--no-progress",
       ];
 
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
       if (type === "audio") {
         ext = "m4a";
-        args = [...commonArgs, "-f", "bestaudio/best", "-o", templateOutput, videoUrl];
+        args = [
+          ...commonArgs,
+          "-f",
+          "96/best",
+          "-o",
+          templateOutput,
+          videoUrl,
+        ];
       } else {
         ext = "mp4";
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";
@@ -635,7 +646,10 @@ export default {
 
         // Try yt-dlp silently with short timeout
         try {
-          await execFileAsync(binaryPath, args, { timeout: 120000 });
+          await execFileAsync(binaryPath, args, {
+            timeout: 180000,
+            maxBuffer: 16 * 1024 * 1024,
+          });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
           const found = tmpFiles.find(
             (f) =>
@@ -648,12 +662,14 @@ export default {
           );
           if (found) {
             const actualFile = path.resolve("/tmp", found);
-            const fileBuffer = await fs.promises.readFile(actualFile);
-            await fs.promises.unlink(actualFile).catch(() => {});
+            const mediaStream = fs.createReadStream(actualFile);
+            mediaStream.once("close", () => {
+              void fs.promises.unlink(actualFile).catch(() => {});
+            });
             const foundExt = path.extname(found).replace(".", "") || "mp3";
             const isMp4Audio = foundExt === "mp4";
             const filename = `${cleanTitle}.${isMp4Audio ? "m4a" : foundExt}`;
-            return new Response(fileBuffer, {
+            return new Response(Readable.toWeb(mediaStream) as unknown as BodyInit, {
               headers: {
                 "content-type":
                   foundExt === "m4a" || isMp4Audio
@@ -662,7 +678,6 @@ export default {
                       ? "audio/webm"
                       : "audio/mpeg",
                 "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-                "content-length": fileBuffer.byteLength.toString(),
                 "access-control-allow-origin": "*",
               },
             });
@@ -697,14 +712,15 @@ export default {
         const found = tmpFiles.find((f) => f.startsWith(basePrefix) && f.endsWith(".mp4"));
         const actualFile = found ? path.resolve("/tmp", found) : "";
         if (actualFile && fs.existsSync(actualFile)) {
-          const fileBuffer = await fs.promises.readFile(actualFile);
-          await fs.promises.unlink(actualFile).catch(() => {});
+          const mediaStream = fs.createReadStream(actualFile);
+          mediaStream.once("close", () => {
+            void fs.promises.unlink(actualFile).catch(() => {});
+          });
           const filename = `${cleanTitle}.mp4`;
-          return new Response(fileBuffer, {
+          return new Response(Readable.toWeb(mediaStream) as unknown as BodyInit, {
             headers: {
               "content-type": "video/mp4",
               "content-disposition": `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-              "content-length": fileBuffer.byteLength.toString(),
               "access-control-allow-origin": "*",
             },
           });

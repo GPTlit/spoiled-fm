@@ -132,7 +132,7 @@ async function extractCoverFallback(file: File): Promise<Blob | undefined> {
 
 function findImageIn(b: Uint8Array): Blob | undefined {
   for (let i = 0; i < b.length - 8; i++) {
-    if (b[i] === 0xff && b[i + 1] === 0xd8 && b[i + 2] === 0xff) {
+    if (b[i] === 0xff && b[i + 1] === 0xd8 && b[i + 2] === 0xff && (b[i + 3] === 0xe0 || b[i + 3] === 0xe1 || b[i + 3] === 0xdb)) {
       for (let j = i + 4; j < b.length - 1; j++) {
         if (b[j] === 0xff && b[j + 1] === 0xd9 && j - i > 2000) {
           return bytesToImageBlob(b.subarray(i, j + 2), "image/jpeg");

@@ -113,65 +113,6 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/api/proxy-image" && request.method === "GET") {
-      const targetUrl = url.searchParams.get("url");
-      if (!targetUrl) {
-        return new Response("Missing url", { status: 400 });
-      }
-      try {
-        const imgRes = await fetch(targetUrl);
-        const blob = await imgRes.arrayBuffer();
-        const contentType = imgRes.headers.get("content-type") || "image/jpeg";
-        return new Response(blob, {
-          headers: {
-            "content-type": contentType,
-            "access-control-allow-origin": "*",
-            "cache-control": "public, max-age=86400",
-          },
-        });
-      } catch {
-        return new Response("Failed to fetch image", { status: 500 });
-      }
-    }
-
-    if (url.pathname === "/api/lyrics" && request.method === "GET") {
-      const trackName = url.searchParams.get("title") || "";
-      const artistName = url.searchParams.get("artist") || "";
-      const duration = url.searchParams.get("duration") || "";
-      if (!trackName) {
-        return new Response(JSON.stringify({ error: "Missing title parameter" }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      try {
-        const queryParams = new URLSearchParams({
-          track_name: trackName,
-        });
-        if (artistName) queryParams.set("artist_name", artistName);
-        if (duration) queryParams.set("duration", duration);
-
-        const lrcRes = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
-          headers: { "User-Agent": "SPOILED-Audio-Player/1.0" },
-        });
-        if (lrcRes.ok) {
-          const lrcData = await lrcRes.json();
-          return new Response(JSON.stringify(lrcData), {
-            headers: {
-              "content-type": "application/json",
-              "cache-control": "public, max-age=86400",
-            },
-          });
-        }
-      } catch (err) {
-        console.error("Lyrics fetch error:", err);
-      }
-      return new Response(JSON.stringify({ error: "Lyrics unavailable" }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      });
-    }
-
     if (url.pathname === "/api/youtube/search" && request.method === "GET") {
       const q = url.searchParams.get("q") || "";
       const videos = await searchYouTube(q);
@@ -224,7 +165,7 @@ export default {
         "--js-runtimes",
         `node:${nodePath}`,
         "--extractor-args",
-        "youtube:player_client=android,web",
+        "youtube:player_client=mweb,web,android",
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",
@@ -258,7 +199,7 @@ export default {
         args = [
           ...commonArgs,
           "-f",
-          `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/18/best`,
+          `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`,
           "--merge-output-format",
           "mp4",
           "-o",
@@ -268,51 +209,14 @@ export default {
       }
 
       try {
-        await execFileAsync(binaryPath, args, { timeout: 180000 });
+        await execFileAsync(binaryPath, args, { timeout: 35000 });
 
-        let actualFile = targetFile;
-        if (!fs.existsSync(actualFile)) {
-          const baseName = `spoiled_${timestamp}_${randomSuffix}`;
-          const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
-          const found = tmpFiles.find((f) => f.startsWith(baseName));
-          if (found) {
-            actualFile = path.resolve("/tmp", found);
-            const foundExt = path.extname(found).replace(".", "");
-            if (foundExt) ext = foundExt;
-          }
+        if (!fs.existsSync(targetFile)) {
+          throw new Error("Downloaded file was not created");
         }
 
-        if (!fs.existsSync(actualFile)) {
-          // Fallback attempt: direct format 140/18
-          const fallbackArgs = [
-            ...commonArgs,
-            "-f",
-            type === "audio" ? "140/ba/b/18" : "18/best",
-            "-o",
-            targetFile,
-            videoUrl,
-          ];
-          await execFileAsync(binaryPath, fallbackArgs, { timeout: 90000 });
-          if (!fs.existsSync(targetFile)) {
-            const baseName = `spoiled_${timestamp}_${randomSuffix}`;
-            const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
-            const found = tmpFiles.find((f) => f.startsWith(baseName));
-            if (found) {
-              actualFile = path.resolve("/tmp", found);
-              const foundExt = path.extname(found).replace(".", "");
-              if (foundExt) ext = foundExt;
-            }
-          } else {
-            actualFile = targetFile;
-          }
-        }
-
-        if (!fs.existsSync(actualFile)) {
-          throw new Error("Downloaded file was not created by server");
-        }
-
-        const fileBuffer = await fs.promises.readFile(actualFile);
-        await fs.promises.unlink(actualFile).catch(() => {});
+        const fileBuffer = await fs.promises.readFile(targetFile);
+        await fs.promises.unlink(targetFile).catch(() => {});
 
         const contentType =
           type === "audio" ? (ext === "mp3" ? "audio/mpeg" : "audio/mp4") : "video/mp4";

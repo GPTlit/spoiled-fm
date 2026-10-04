@@ -101,11 +101,6 @@ interface Ctx {
   setEqPreset: (preset: EqPreset) => void;
   setEqGain: (bandIndex: number, gain: number) => void;
   addFiles: (files: FileList | File[]) => Promise<number>;
-  addTrackWithArtwork: (
-    file: File,
-    pictureBlob?: Blob,
-    metaOverrides?: { title?: string; artist?: string; album?: string },
-  ) => Promise<Track>;
   playTrack: (id: string, list?: string[]) => void;
   toggle: () => void;
   next: () => void;
@@ -119,7 +114,6 @@ interface Ctx {
     changes: Pick<Track, "title" | "artist" | "album">,
   ) => Promise<void>;
   setTrackArtwork: (id: string, pictureBlob: Blob) => Promise<void>;
-  removeTrack: (id: string) => Promise<void>;
   setShuffle: (v: boolean) => void;
   setRepeat: (v: boolean) => void;
   enqueue: (id: string) => void;
@@ -161,12 +155,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const fading = useRef(false);
   const fadeFrame = useRef<number | null>(null);
 
-  // Web Audio Context, Gain Nodes & Filter Chains
+  // Web Audio Context & Biquad Filter Chains
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const gainNodesRef = useRef<GainNode[]>([]);
-  const masterGainRef = useRef<GainNode | null>(null);
   const filterChainsRef = useRef<BiquadFilterNode[][]>([]);
-  const preloadedTrackId = useRef<string | null>(null);
 
   const stateRef = useRef({ queue, index, library, crossfade, mixMode, repeat, volume, eqGains });
   stateRef.current = { queue, index, library, crossfade, mixMode, repeat, volume, eqGains };
@@ -222,7 +213,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Initialize Web Audio Filter Chain with per-deck GainNodes for seamless Apple Music crossfade
+  // Initialize Web Audio Filter Chain
   const initAudioNodes = useCallback(() => {
     if (audioCtxRef.current || typeof window === "undefined") return;
     const AudioContextClass =
@@ -233,11 +224,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     try {
       const ctx = new AudioContextClass();
       audioCtxRef.current = ctx;
-
-      const masterGain = ctx.createGain();
-      masterGain.gain.value = stateRef.current.volume;
-      masterGain.connect(ctx.destination);
-      masterGainRef.current = masterGain;
 
       decks.current.forEach((audioEl, deckIdx) => {
         try {
@@ -257,27 +243,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             return filter;
           });
 
-          const deckGain = ctx.createGain();
-          deckGain.gain.value = deckIdx === 0 ? 1 : 0;
-          gainNodesRef.current[deckIdx] = deckGain;
-
-          // Chain: source -> filters -> deckGain -> masterGain -> destination
+          // Chain filters: source -> filter0 -> filter1 ... -> destination
           source.connect(filters[0]!);
           for (let f = 0; f < filters.length - 1; f++) {
             filters[f]!.connect(filters[f + 1]!);
           }
-          filters[filters.length - 1]!.connect(deckGain);
-          deckGain.connect(masterGain);
+          filters[filters.length - 1]!.connect(ctx.destination);
 
           if (!filterChainsRef.current[deckIdx]) {
             filterChainsRef.current[deckIdx] = filters;
           }
         } catch {
-          // Audio routing in test or restricted environment
+          // Audio routing in test or locked environment
         }
       });
     } catch {
-      // AudioContext not allowed or unavailable
+      // AudioContext not allowed or mock
     }
   }, []);
 
@@ -322,87 +303,44 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
       fadeFrame.current = null;
       fading.current = false;
-
-      const fromIdx = active.current;
-      const from = d[fromIdx]!;
-      const shouldFade = fadeSeconds > 0 && !from.paused && from.currentTime > 0;
-      const toIdx = shouldFade ? 1 - fromIdx : fromIdx;
+      const from = d[active.current]!;
+      const shouldFade = fadeSeconds > 0 && !from.paused;
+      const toIdx = shouldFade ? 1 - active.current : active.current;
       const to = d[toIdx]!;
-      const vol = stateRef.current.volume;
-
       to.src = track.url;
-      to.currentTime = 0;
+      const vol = stateRef.current.volume;
 
       if (shouldFade) {
         fading.current = true;
         to.volume = 0;
-
-        const ctx = audioCtxRef.current;
-        const now = ctx ? ctx.currentTime : 0;
-        const fromGain = gainNodesRef.current[fromIdx];
-        const toGain = gainNodesRef.current[toIdx];
-
-        // Apple Music Automix: roll off low-end on outgoing track to prevent muddy clashing
-        const fromFilters = filterChainsRef.current[fromIdx];
-        if (stateRef.current.mixMode === "automix" && fromFilters?.[0]) {
-          try {
-            fromFilters[0].gain.cancelScheduledValues(now);
-            fromFilters[0].gain.linearRampToValueAtTime(-8, now + fadeSeconds * 0.6);
-          } catch {
-            /* ignore */
-          }
-        }
-
-        if (ctx && fromGain && toGain) {
-          try {
-            fromGain.gain.cancelScheduledValues(now);
-            toGain.gain.cancelScheduledValues(now);
-            fromGain.gain.setValueAtTime(1, now);
-            fromGain.gain.linearRampToValueAtTime(0, now + fadeSeconds);
-            toGain.gain.setValueAtTime(0, now);
-            toGain.gain.linearRampToValueAtTime(1, now + fadeSeconds);
-          } catch {
-            /* fallback to audio element volume */
-          }
-        }
-
         void to.play().catch(() => {
           from.pause();
           fading.current = false;
         });
-
-        const ms = Math.max(300, fadeSeconds * 1000);
+        const ms = Math.max(
+          250,
+          Math.min(fadeSeconds, from.duration - from.currentTime || fadeSeconds) * 1000,
+        );
         const start = performance.now();
-
-        const step = (currentNow: number) => {
+        const step = (now: number) => {
           if (!fading.current) return;
-          const p = Math.min(1, (currentNow - start) / ms);
-
-          // Equal-power sinusoidal crossfade curve
+          const p = Math.min(1, (now - start) / ms);
           to.volume = vol * Math.sin((p * Math.PI) / 2);
           from.volume = vol * Math.cos((p * Math.PI) / 2);
-
           if (p < 1) {
             fadeFrame.current = requestAnimationFrame(step);
           } else {
             from.pause();
             from.volume = vol;
-            if (fromGain) fromGain.gain.value = 1;
-            // Restore EQ filter baseline
-            if (fromFilters?.[0]) {
-              fromFilters[0].gain.value = stateRef.current.eqGains[0] || 0;
-            }
             fading.current = false;
             fadeFrame.current = null;
           }
         };
-
         fadeFrame.current = requestAnimationFrame(step);
         active.current = toIdx;
       } else {
         d.forEach((a, i) => i !== toIdx && a.pause());
         to.volume = vol;
-        if (gainNodesRef.current[toIdx]) gainNodesRef.current[toIdx].gain.value = 1;
         void to.play().catch(() => {});
         active.current = toIdx;
       }
@@ -444,34 +382,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
-      const { crossfade, mixMode, index, queue, library } = stateRef.current;
-
-      // Apple Music Automix: dynamically sets 3s to 8s overlap based on track length
+      const { crossfade, mixMode, index } = stateRef.current;
       const transition =
-        mixMode === "automix" ? Math.min(8, Math.max(3, (a.duration || 60) * 0.05)) : crossfade;
-
-      // Preload next track audio buffer 2 seconds before crossfade initiates
-      const nextIdx = index + 1;
-      if (a.duration && a.duration - a.currentTime <= transition + 2 && nextIdx < queue.length) {
-        const nextTrack = library.find((x) => x.id === queue[nextIdx]);
-        if (nextTrack && preloadedTrackId.current !== nextTrack.id) {
-          preloadedTrackId.current = nextTrack.id;
-          const nextDeckIdx = 1 - active.current;
-          const nextDeck = decks.current[nextDeckIdx];
-          if (nextDeck && nextDeck.src !== nextTrack.url) {
-            nextDeck.src = nextTrack.url;
-            nextDeck.load();
-          }
-        }
-      }
-
+        mixMode === "automix" ? Math.min(6, Math.max(1.5, a.duration * 0.06)) : crossfade;
       if (
         !fading.current &&
         !a.paused &&
         a.duration &&
         transition > 0 &&
         a.duration - a.currentTime <= transition &&
-        (index + 1 < queue.length || stateRef.current.repeat)
+        (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)
       ) {
         goTo(index + 1, transition);
       }
@@ -589,34 +509,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     setLibrary((prev) => [...prev, ...newTracks]);
     return newTracks.length;
-  };
-
-  const addTrackWithArtwork = async (
-    file: File,
-    pictureBlob?: Blob,
-    metaOverrides?: { title?: string; artist?: string; album?: string },
-  ): Promise<Track> => {
-    const meta = await extractAudioMetadata(file);
-    const url = URL.createObjectURL(file);
-    const picBlob = pictureBlob || meta.pictureBlob;
-    const track: Track = {
-      id: crypto.randomUUID(),
-      title: metaOverrides?.title || meta.title,
-      artist: metaOverrides?.artist || meta.artist,
-      album: metaOverrides?.album || meta.album,
-      year: meta.year,
-      genre: meta.genre,
-      trackNumber: meta.trackNumber,
-      duration: meta.duration,
-      url,
-      pictureUrl: picBlob ? URL.createObjectURL(picBlob) : meta.pictureUrl,
-      hasEmbeddedPicture: Boolean(picBlob),
-      hue: Math.floor(Math.random() * 60) + 20,
-    };
-
-    await saveTrackToIdb(track, file, picBlob);
-    setLibrary((prev) => [...prev, track]);
-    return track;
   };
 
   const playTrack = (id: string, list?: string[]) => {
@@ -737,32 +629,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const removeTrack = async (id: string) => {
-    if (current?.id === id) {
-      if (queue.length > 1) {
-        goTo(index + 1);
-      } else {
-        decks.current.forEach((a) => a.pause());
-        setPlaying(false);
-      }
-    }
-    setLibrary((tracks) => tracks.filter((t) => t.id !== id));
-    setQueue((q) => q.filter((tId) => tId !== id));
-    try {
-      const db = await openLibrary();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction("tracks", "readwrite");
-        const store = tx.objectStore("tracks");
-        store.delete(id);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      db.close();
-    } catch (e) {
-      console.warn("Could not delete track from IndexedDB", e);
-    }
-  };
-
   return (
     <PlayerCtx.Provider
       value={{
@@ -783,7 +649,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setEqPreset,
         setEqGain,
         addFiles,
-        addTrackWithArtwork,
         playTrack,
         toggle,
         next: () =>
@@ -804,7 +669,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setMixMode,
         updateTrackInfo,
         setTrackArtwork,
-        removeTrack,
         setShuffle,
         setRepeat,
         enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),

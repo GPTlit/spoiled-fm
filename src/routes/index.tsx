@@ -46,7 +46,6 @@ import {
   Check,
   Loader2,
   AlertCircle,
-  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -88,8 +87,7 @@ type Screen =
   | "queue"
   | "album"
   | "playlist"
-  | "watch"
-  | "downloads";
+  | "watch";
 
 type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
 
@@ -225,19 +223,6 @@ function MusicApp() {
     views?: string;
   }
 
-  interface DownloadTask {
-    id: string;
-    videoId: string;
-    title: string;
-    channel: string;
-    thumbnail: string;
-    type: "audio" | "video";
-    quality: string;
-    status: "downloading" | "saving" | "completed" | "error";
-    progress: number;
-    error?: string;
-  }
-
   const [searchScope, setSearchScope] = useState<"all" | "online" | "local">("all");
   const [onlineVideos, setOnlineVideos] = useState<OnlineVideo[]>([]);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -248,22 +233,10 @@ function MusicApp() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [downloadModalVideo, setDownloadModalVideo] = useState<OnlineVideo | null>(null);
-  const [downloadType, setDownloadType] = useState<"video" | "audio">("audio");
-  const [selectedQuality, setSelectedQuality] = useState<string>("320");
+  const [downloadType, setDownloadType] = useState<"video" | "audio">("video");
+  const [selectedQuality, setSelectedQuality] = useState<string>("720");
   const [downloadInProgress, setDownloadInProgress] = useState(false);
   const [downloadProgressText, setDownloadProgressText] = useState("");
-  const [downloadQueue, setDownloadQueue] = useState<DownloadTask[]>([]);
-  const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
-  const [permissionsModalOpen, setPermissionsModalOpen] = useState(false);
-  const [directDownloadOpen, setDirectDownloadOpen] = useState(false);
-  const [directDownloadQuery, setDirectDownloadQuery] = useState("");
-  const [directDownloadLoading, setDirectDownloadLoading] = useState(false);
-  const [permissionsState, setPermissionsState] = useState<Record<string, boolean>>({
-    storage: true,
-    audio: true,
-    notifications: false,
-    camera: false,
-  });
   const [downloads, setDownloads] = useState<{ id: string; title: string; status: string }[]>([]);
   const [editInfo, setEditInfo] = useState(false);
   const [infoDraft, setInfoDraft] = useState({ title: "", artist: "", album: "" });
@@ -276,7 +249,7 @@ function MusicApp() {
     const track = p.library.find((item) => !pending.previousIds.has(item.id));
     if (!track) return;
     pendingArtwork.current = null;
-    void fetch(`/api/proxy-image?url=${encodeURIComponent(pending.thumbnail)}`)
+    void fetch(pending.thumbnail)
       .then((response) => {
         if (!response.ok) throw new Error("Artwork unavailable");
         return response.blob();
@@ -290,39 +263,6 @@ function MusicApp() {
   const parsedLrc = useMemo(() => parseLrc(currentLyricText), [currentLyricText]);
   const activeLrcIndex = useMemo(() => findCurrentLrcIndex(parsedLrc, p.time), [parsedLrc, p.time]);
   const lrcContainerRef = useRef<HTMLDivElement>(null);
-
-  // Auto-fetch synced lyrics from open synced lyrics database if not available locally
-  useEffect(() => {
-    if (!p.current) return;
-    const trackId = p.current.id;
-    if (lyrics[trackId]) return;
-
-    let cancelled = false;
-    const cleanTitle = p.current.title.replace(/\(.*?\)|\[.*?\]/g, "").trim();
-    const cleanArtist = p.current.artist.replace(/\(.*?\)|\[.*?\]/g, "").trim();
-    const dur = Math.round(p.current.duration || 0);
-
-    fetch(
-      `/api/lyrics?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(cleanArtist)}&duration=${dur}`,
-    )
-      .then((res) => {
-        if (!res.ok) throw new Error("Lyrics unavailable");
-        return res.json();
-      })
-      .then((data: { syncedLyrics?: string; plainLyrics?: string }) => {
-        if (!cancelled) {
-          const lrc = data.syncedLyrics || data.plainLyrics;
-          if (lrc) {
-            setLyrics((prev) => ({ ...prev, [trackId]: lrc }));
-          }
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [p.current?.id, p.current?.title, p.current?.artist]);
 
   useEffect(() => {
     if (activeLrcIndex >= 0 && lrcContainerRef.current) {
@@ -617,139 +557,6 @@ function MusicApp() {
     };
   }, [activeWatchVideo]);
 
-  const requestPermission = async (key: string) => {
-    if (key === "notifications" && typeof Notification !== "undefined") {
-      try {
-        const res = await Notification.requestPermission();
-        setPermissionsState((prev) => ({ ...prev, notifications: res === "granted" }));
-        setMessage(
-          res === "granted" ? "Notifications enabled for audio playback" : "Notifications declined",
-        );
-      } catch {
-        setMessage("Notification permission prompt closed");
-      }
-      return;
-    }
-    if (key === "camera" && typeof navigator !== "undefined" && navigator.mediaDevices) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        stream.getTracks().forEach((track) => track.stop());
-        setPermissionsState((prev) => ({ ...prev, camera: true }));
-        setMessage("Camera & Photo access active");
-      } catch {
-        setMessage("Camera permission was dismissed");
-      }
-      return;
-    }
-    setPermissionsState((prev) => ({ ...prev, [key]: true }));
-    setMessage("Permission active");
-  };
-
-  const startDownloadTask = async (
-    video: OnlineVideo,
-    type: "audio" | "video" = "audio",
-    quality: string = type === "audio" ? "320" : "720",
-  ) => {
-    const taskId = crypto.randomUUID();
-    const newTask: DownloadTask = {
-      id: taskId,
-      videoId: video.id,
-      title: video.title,
-      channel: video.channel,
-      thumbnail: video.thumbnail,
-      type,
-      quality,
-      status: "downloading",
-      progress: 15,
-    };
-
-    setDownloadQueue((prev) => [newTask, ...prev.filter((t) => t.videoId !== video.id)]);
-    setMessage(`Queued "${video.title}" for download`);
-
-    const interval = setInterval(() => {
-      setDownloadQueue((prev) =>
-        prev.map((t) =>
-          t.id === taskId && t.status === "downloading"
-            ? { ...t, progress: Math.min(85, t.progress + 15) }
-            : t,
-        ),
-      );
-    }, 600);
-
-    try {
-      const url = `/api/video/download?id=${encodeURIComponent(video.id)}&type=${type}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(video.title)}`;
-      const res = await fetch(url);
-      clearInterval(interval);
-
-      if (!res.ok) {
-        throw new Error("Download stream unavailable from server");
-      }
-
-      setDownloadQueue((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: "saving", progress: 90 } : t)),
-      );
-
-      const blob = await res.blob();
-      const ext = type === "audio" ? (quality === "128" ? "m4a" : "mp3") : "mp4";
-      const sanitized = video.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
-
-      if (type === "audio") {
-        let pictureBlob: Blob | undefined;
-        try {
-          const imgRes = await fetch(`/api/proxy-image?url=${encodeURIComponent(video.thumbnail)}`);
-          if (imgRes.ok) {
-            pictureBlob = await imgRes.blob();
-          }
-        } catch {
-          try {
-            const direct = await fetch(video.thumbnail);
-            if (direct.ok) pictureBlob = await direct.blob();
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const file = new File([blob], `${sanitized}.${ext}`, {
-          type: ext === "mp3" ? "audio/mpeg" : "audio/mp4",
-        });
-
-        await p.addTrackWithArtwork(file, pictureBlob, {
-          title: video.title,
-          artist: video.channel,
-          album: "SPOILED Downloads",
-        });
-
-        setDownloadQueue((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
-        );
-        setMessage(`Saved "${video.title}" to library!`);
-      } else {
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `${sanitized}.mp4`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-
-        setDownloadQueue((prev) =>
-          prev.map((t) => (t.id === taskId ? { ...t, status: "completed", progress: 100 } : t)),
-        );
-        setMessage(`Video "${video.title}" saved to device!`);
-      }
-    } catch (err: unknown) {
-      clearInterval(interval);
-      console.error("Download failed:", err);
-      const errMsg = err instanceof Error ? err.message : "Download failed";
-      setDownloadQueue((prev) =>
-        prev.map((t) =>
-          t.id === taskId ? { ...t, status: "error", progress: 0, error: errMsg } : t,
-        ),
-      );
-      setMessage(`Could not download "${video.title}".`);
-    }
-  };
-
   const openDownloadModal = (video: OnlineVideo, defaultType: "video" | "audio" = "video") => {
     setDownloadModalVideo(video);
     setDownloadType(defaultType);
@@ -760,19 +567,117 @@ function MusicApp() {
   };
 
   const handleDownloadFile = async () => {
-    if (!downloadModalVideo) return;
-    const vid = downloadModalVideo;
-    const t = downloadType;
-    const q = selectedQuality;
+    if (!downloadModalVideo || downloadInProgress) return;
+    setDownloadInProgress(true);
+    setDownloads((items) => [
+      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" },
+      ...items.filter((item) => item.id !== downloadModalVideo.id),
+    ]);
     setDownloadModalOpen(false);
-    void startDownloadTask(vid, t, q);
+    setDownloadProgressText(
+      downloadType === "audio"
+        ? `Preparing & encoding ${selectedQuality}kbps audio...`
+        : `Rendering ${selectedQuality}p MP4 video...`,
+    );
+
+    try {
+      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=${downloadType}&quality=${encodeURIComponent(selectedQuality)}&title=${encodeURIComponent(downloadModalVideo.title)}`;
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        setDownloads((items) =>
+          items.map((item) =>
+            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
+          ),
+        );
+        setMessage("Download unavailable. You can add audio files you own to your library.");
+        return;
+      }
+
+      setDownloadProgressText("Transferring file to your downloads...");
+      const blob = await res.blob();
+      const ext = downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4";
+      const sanitized =
+        downloadModalVideo.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
+      const filename = `${sanitized}.${ext}`;
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Saved to device" } : item,
+        ),
+      );
+      setMessage(`Downloaded "${filename}" successfully!`);
+      setDownloadModalOpen(false);
+    } catch (err: unknown) {
+      console.error("Download error:", err);
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
+        ),
+      );
+      setMessage("Download failed. Please try again later.");
+    } finally {
+      setDownloadInProgress(false);
+      setDownloadProgressText("");
+    }
   };
 
   const handleSaveToLocalLibrary = async () => {
-    if (!downloadModalVideo) return;
-    const vid = downloadModalVideo;
+    if (!downloadModalVideo || downloadInProgress) return;
+    setDownloadInProgress(true);
+    setDownloads((items) => [
+      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Adding to library" },
+      ...items.filter((item) => item.id !== downloadModalVideo.id),
+    ]);
     setDownloadModalOpen(false);
-    void startDownloadTask(vid, "audio", "320");
+    setDownloadProgressText("Importing audio into your library...");
+
+    try {
+      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        setDownloads((items) =>
+          items.map((item) =>
+            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
+          ),
+        );
+        setMessage("Audio isn't available for import. Add an audio file you own instead.");
+        return;
+      }
+
+      const blob = await res.blob();
+      const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
+      const before = new Set(p.library.map((track) => track.id));
+      await p.addFiles([file]);
+      // The imported track is committed on the next render.
+      pendingArtwork.current = { previousIds: before, thumbnail: downloadModalVideo.thumbnail };
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item,
+        ),
+      );
+      setMessage(`"${downloadModalVideo.title}" added to your local library!`);
+      setDownloadModalOpen(false);
+    } catch (err: unknown) {
+      console.error("Save to library error:", err);
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
+        ),
+      );
+      setMessage("Audio couldn't be imported. Add an audio file you own instead.");
+    } finally {
+      setDownloadInProgress(false);
+      setDownloadProgressText("");
+    }
   };
 
   const playYoutube = (target: string) => {
@@ -893,7 +798,7 @@ function MusicApp() {
   const rows = (tracks: Track[]) =>
     tracks.length ? (
       <div className="track-list">
-        {tracks.map((t, idx) => (
+        {tracks.map((t) => (
           <div key={t.id} className="track-row">
             <Button
               variant="ghost"
@@ -906,26 +811,22 @@ function MusicApp() {
               }
               title={`Play ${t.title}`}
             >
-              <span className="text-xs font-semibold text-muted-foreground w-5 text-center shrink-0">
-                {idx + 1}
-              </span>
-              <Art track={t} className="track-art shrink-0" />
-              <div className="track-copy">
+              <Art track={t} className="track-art" />
+              <span className="track-copy">
                 <strong>{t.title}</strong>
                 <small>
-                  {t.artist} {t.album ? `· ${t.album}` : ""}
+                  {t.artist} · {t.album}
                 </small>
-              </div>
+              </span>
             </Button>
             <span className="track-duration">{t.duration ? fmt(t.duration) : ""}</span>
             <Button
               variant="ghost"
               size="icon"
-              className="shrink-0 h-8 w-8 text-muted-foreground hover:text-foreground"
               title={`Options for ${t.title}`}
               onClick={() => setMenu(menu === t.id ? null : t.id)}
             >
-              <MoreHorizontal className="h-4 w-4" />
+              <MoreHorizontal />
             </Button>
             {menu === t.id && (
               <div className="row-menu">
@@ -950,20 +851,6 @@ function MusicApp() {
                   }}
                 >
                   <ListMusic className="mr-2 h-4 w-4" /> Play next
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setInfoDraft({
-                      title: t.title,
-                      artist: t.artist,
-                      album: t.album,
-                    });
-                    setEditInfo(true);
-                    setMenu(null);
-                  }}
-                >
-                  <SlidersHorizontal className="mr-2 h-4 w-4" /> Edit song info
                 </Button>
                 <Button
                   variant="ghost"
@@ -1082,100 +969,59 @@ function MusicApp() {
       <input ref={backupInput} type="file" accept=".json" hidden onChange={handleImportBackup} />
       <input ref={lrcInput} type="file" accept=".lrc,.txt" hidden onChange={handleLrcUpload} />
 
-      {/* Android Dynamic Notch / Island widget */}
-      {p.current && !["now", "lyrics", "queue"].includes(screen) && (
-        <div
-          className="android-notch-island"
-          onClick={() => go("now")}
-          role="button"
-          tabIndex={0}
-          title="Open Now Playing"
-        >
-          <div className="notch-thumb">
-            <Art track={p.current} />
-          </div>
-          <div className="notch-details">
-            <span className="notch-title">{p.current.title}</span>
-            <span className="notch-artist">{p.current.artist}</span>
-          </div>
-          <div className="notch-wave-bars" aria-hidden="true">
-            <span className={`notch-bar ${p.playing ? "animating" : ""}`} />
-            <span className={`notch-bar ${p.playing ? "animating" : ""}`} />
-            <span className={`notch-bar ${p.playing ? "animating" : ""}`} />
-          </div>
-          <button
-            type="button"
-            className="notch-action-btn"
-            title={p.playing ? "Pause" : "Play"}
-            onClick={(e) => {
-              e.stopPropagation();
-              p.toggle();
-            }}
-          >
-            {p.playing ? (
-              <Pause className="h-3.5 w-3.5" />
-            ) : (
-              <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
-            )}
-          </button>
-        </div>
-      )}
-
       <div className="app-layout">
-        {!["now", "lyrics", "queue"].includes(screen) && (
-          <aside className="desktop-sidebar">
-            <div className="brand-badge">
-              <div className="brand-icon-wrapper">
-                <img src={spoiledLiquidLogo} alt="SPOILED" className="brand-logo" />
-              </div>
-              <div className="brand-text">
-                <span className="brand-title">SPOILED</span>
-                <span className="brand-tag">LIQUID GLASS AUDIO</span>
-              </div>
+        <aside className="desktop-sidebar">
+          <div className="brand-badge">
+            <div className="brand-icon-wrapper">
+              <img src={spoiledLiquidLogo} alt="SPOILED" className="brand-logo" />
             </div>
-            <p className="sidebar-heading">YOUR MUSIC, YOUR WORLD</p>
-            <div className="sidebar-nav">
-              {nav.map(({ screen: s, label, icon: Icon }) => (
-                <Button
-                  key={s}
-                  variant="ghost"
-                  className={activeNav === s ? "selected" : ""}
-                  onClick={() => go(s)}
-                >
-                  <Icon />
-                  {label}
-                </Button>
-              ))}
+            <div className="brand-text">
+              <span className="brand-title">SPOILED</span>
+              <span className="brand-tag">LIQUID GLASS AUDIO</span>
+            </div>
+          </div>
+          <p className="sidebar-heading">YOUR MUSIC, YOUR WORLD</p>
+          <div className="sidebar-nav">
+            {nav.map(({ screen: s, label, icon: Icon }) => (
               <Button
+                key={s}
                 variant="ghost"
-                className={activeNav === "search" ? "selected" : ""}
-                onClick={() => go("search")}
+                className={activeNav === s ? "selected" : ""}
+                onClick={() => go(s)}
               >
-                <Search />
-                Search
+                <Icon />
+                {label}
               </Button>
-              <Button
-                variant="ghost"
-                className={activeNav === "liked" ? "selected" : ""}
-                onClick={() => go("liked")}
-              >
-                <Heart />
-                Loved songs
-              </Button>
-            </div>
-            <div className="sidebar-bottom">
-              <div className="sidebar-account">{accountControl}</div>
-              <Button variant="ghost" onClick={() => go("settings")}>
-                <Settings2 />
-                Settings
-              </Button>
-              <Button className="add-music-btn" onClick={() => files.current?.click()}>
-                <Plus />
-                Add music
-              </Button>
-            </div>
-          </aside>
-        )}
+            ))}
+            <Button
+              variant="ghost"
+              className={activeNav === "search" ? "selected" : ""}
+              onClick={() => go("search")}
+            >
+              <Search />
+              Search
+            </Button>
+            <Button
+              variant="ghost"
+              className={activeNav === "liked" ? "selected" : ""}
+              onClick={() => go("liked")}
+            >
+              <Heart />
+              Loved songs
+            </Button>
+          </div>
+          <div className="sidebar-bottom">
+            <div className="sidebar-account">{accountControl}</div>
+            <Button variant="ghost" onClick={() => go("settings")}>
+              <Settings2 />
+              Settings
+            </Button>
+            <Button className="add-music-btn" onClick={() => files.current?.click()}>
+              <Plus />
+              Add music
+            </Button>
+          </div>
+        </aside>
 
         <main className="main-screen">
           {screen === "home" && (
@@ -1185,37 +1031,15 @@ function MusicApp() {
                   <img src={spoiledLiquidLogo} alt="" className="topline-icon" />
                   <span>SPOILED</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn relative shrink-0"
-                    title="Download queue"
-                    onClick={() => setQueueDrawerOpen(true)}
-                  >
-                    <Download className="h-4 w-4" />
-                    {downloadQueue.filter(
-                      (d) => d.status === "downloading" || d.status === "saving",
-                    ).length > 0 && (
-                      <span className="top-action-badge animate-pulse">
-                        {
-                          downloadQueue.filter(
-                            (d) => d.status === "downloading" || d.status === "saving",
-                          ).length
-                        }
-                      </span>
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn"
-                    title="Settings"
-                    onClick={() => go("settings")}
-                  >
-                    <Settings2 />
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="glass-icon-btn"
+                  title="Settings"
+                  onClick={() => go("settings")}
+                >
+                  <Settings2 />
+                </Button>
               </div>
 
               <header className="home-head">
@@ -1255,6 +1079,28 @@ function MusicApp() {
                   <h2>Living Soundscapes</h2>
                   <p>Move your cursor to sculpt reactive fluid sound waves over liquid glass.</p>
                 </div>
+              </div>
+
+              <div
+                className="feature"
+                style={{
+                  backgroundImage: `linear-gradient(0deg, var(--feature-shade), transparent 65%), url(${auroraBanner})`,
+                }}
+              >
+                <div className="feature-content">
+                  <span className="feature-kicker">FLUID SOUNDSCAPES</span>
+                  <h2>Better Days</h2>
+                  <p>A crystal space to discover and immerse.</p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="feature-play-btn"
+                  title="Explore music"
+                  onClick={() => go("explore")}
+                >
+                  <Compass />
+                </Button>
               </div>
 
               <div className="quick-grid">
@@ -1341,37 +1187,15 @@ function MusicApp() {
                   <p className="eyebrow">YOUR COLLECTION</p>
                   <h1>Library</h1>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn relative shrink-0"
-                    title="Download queue"
-                    onClick={() => setQueueDrawerOpen(true)}
-                  >
-                    <Download className="h-4 w-4" />
-                    {downloadQueue.filter(
-                      (d) => d.status === "downloading" || d.status === "saving",
-                    ).length > 0 && (
-                      <span className="top-action-badge animate-pulse">
-                        {
-                          downloadQueue.filter(
-                            (d) => d.status === "downloading" || d.status === "saving",
-                          ).length
-                        }
-                      </span>
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn"
-                    title="Add music"
-                    onClick={() => files.current?.click()}
-                  >
-                    <Plus />
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="glass-icon-btn"
+                  title="Add music"
+                  onClick={() => files.current?.click()}
+                >
+                  <Plus />
+                </Button>
               </header>
 
               <div className="segmented">
@@ -1392,13 +1216,6 @@ function MusicApp() {
                   <div className="library-tools">
                     <Button variant="ghost" onClick={() => playList(list, true)}>
                       <Shuffle className="h-4 w-4" /> Shuffle all
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="text-emerald-500 hover:text-emerald-400 font-semibold"
-                      onClick={() => setDirectDownloadOpen(true)}
-                    >
-                      <Download className="h-4 w-4 mr-1" /> Download to Library
                     </Button>
                     <select
                       aria-label="Sort tracks"
@@ -1479,131 +1296,131 @@ function MusicApp() {
 
           {screen === "explore" && (
             <>
-              {/* Top Search Bar placed above everything */}
-              <div className="explore-search-header">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input
-                      aria-label="Search online audio"
-                      className="w-full h-11 pl-10 pr-10 rounded-full bg-white/50 dark:bg-white/10 border border-white/60 dark:border-white/15 backdrop-blur-md text-sm outline-none placeholder:text-muted-foreground focus:border-emerald-500"
-                      placeholder="Search songs, artists, or audio..."
-                      value={youtubeQuery}
-                      onChange={(e) => setYoutubeQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") void searchOnlineVideos(youtubeQuery);
-                      }}
-                    />
-                    {youtubeQuery && (
-                      <button
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setYoutubeQuery("");
-                          void searchOnlineVideos("Top Hits 2026");
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                  <Button
-                    className="rounded-full px-5 h-11"
-                    onClick={() => void searchOnlineVideos(youtubeQuery)}
-                    disabled={onlineLoading}
-                  >
-                    {onlineLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn relative shrink-0"
-                    title="Download queue"
-                    onClick={() => setQueueDrawerOpen(true)}
-                  >
-                    <Download className="h-4 w-4" />
-                    {downloadQueue.filter(
-                      (d) => d.status === "downloading" || d.status === "saving",
-                    ).length > 0 && (
-                      <span className="top-action-badge animate-pulse">
-                        {
-                          downloadQueue.filter(
-                            (d) => d.status === "downloading" || d.status === "saving",
-                          ).length
-                        }
-                      </span>
-                    )}
-                  </Button>
+              <header className="page-head">
+                <div>
+                  <p className="eyebrow">BEYOND YOUR LIBRARY</p>
+                  <h1>Explore</h1>
                 </div>
+                <Compass className="h-6 w-6 text-muted-foreground" />
+              </header>
 
-                <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1">
-                  <span>
-                    {youtubeQuery ? `Results for "${youtubeQuery}"` : "Suggested & Popular Tracks"}
-                  </span>
-                  <span>{onlineVideos.length} songs available</span>
+              <div className="video-search-bar">
+                <div className="video-search-input-wrap">
+                  <input
+                    aria-label="Search videos"
+                    placeholder="Search songs, artists or videos…"
+                    value={youtubeQuery}
+                    onChange={(e) => setYoutubeQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void searchOnlineVideos(youtubeQuery);
+                    }}
+                  />
                 </div>
+                <Button
+                  className="video-search-btn"
+                  onClick={() => void searchOnlineVideos(youtubeQuery)}
+                  disabled={onlineLoading}
+                >
+                  <Search className="h-4 w-4" /> Search
+                </Button>
               </div>
-
-              {onlineLoading && (
-                <div className="py-12 text-center text-muted-foreground flex flex-col items-center gap-2">
-                  <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
-                  <p className="text-xs">Finding songs & audio streams...</p>
-                </div>
-              )}
-
+              <div className="section-title">
+                <h2>Videos</h2>
+              </div>
+              {onlineLoading && <p className="muted-note">Loading videos…</p>}
               {!onlineLoading && onlineVideos.length === 0 && (
-                <div className="p-8 text-center text-muted-foreground">
-                  <p className="text-sm font-semibold">No tracks found</p>
-                  <p className="text-xs mt-1">Try another artist or song query.</p>
+                <p className="muted-note">
+                  No videos available right now. Search for something else.
+                </p>
+              )}
+              {downloads.length > 0 && (
+                <div className="download-activity">
+                  <h2>Downloads</h2>
+                  {downloads.map((item) => (
+                    <div key={item.id}>
+                      <span title={item.title}>{item.title}</span>
+                      <small>{item.status}</small>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              {/* Compact VidMate / YouTube Mobile Search Style Rows */}
-              <div className="explore-compact-list">
-                {onlineVideos.map((vid) => (
-                  <div key={vid.id} className="explore-compact-row" onClick={() => watchVideo(vid)}>
-                    <div className="explore-thumb-wrap">
-                      <img src={vid.thumbnail} alt={vid.title} loading="lazy" />
-                      {vid.duration && (
-                        <span className="explore-duration-pill">{vid.duration}</span>
-                      )}
+              {
+                <div>
+                  {/* Online Video Grid if searched */}
+                  {onlineVideos.length > 0 && (
+                    <div>
+                      <div className="section-title">
+                        <h2 className="flex items-center gap-2">Videos ({onlineVideos.length})</h2>
+                        {onlineLoading && (
+                          <span className="text-xs text-muted-foreground animate-pulse">
+                            Searching…
+                          </span>
+                        )}
+                      </div>
+                      <div className="video-grid">
+                        {onlineVideos.map((vid) => (
+                          <div key={vid.id} className="video-card" onClick={() => watchVideo(vid)}>
+                            <div className="video-thumb-wrap">
+                              <img src={vid.thumbnail} alt={vid.title} />
+                              <div className="video-play-overlay">
+                                <div className="video-play-circle">
+                                  <Play className="h-6 w-6 fill-current ml-0.5" />
+                                </div>
+                              </div>
+                              {vid.duration && (
+                                <span className="video-duration-pill">{vid.duration}</span>
+                              )}
+                            </div>
+                            <div className="video-details">
+                              <strong title={vid.title}>{vid.title}</strong>
+                              <span className="video-channel">
+                                <Youtube className="h-3.5 w-3.5 text-red-500" />
+                                {vid.channel} {vid.views ? `· ${vid.views}` : ""}
+                              </span>
+                              <div className="video-card-actions">
+                                <button
+                                  className="watch-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    watchVideo(vid);
+                                  }}
+                                >
+                                  <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
+                                </button>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openDownloadModal(vid, "video");
+                                    }}
+                                    title="Download Video or Audio"
+                                  >
+                                    <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" />{" "}
+                                    Download
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      watchVideo(vid, true);
+                                    }}
+                                    title="Watch in Mini Player"
+                                  >
+                                    <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="explore-compact-info">
-                      <span className="explore-compact-title" title={vid.title}>
-                        {vid.title}
-                      </span>
-                      <span className="explore-compact-channel">
-                        {vid.channel} {vid.views ? `· ${vid.views}` : ""}
-                      </span>
-                    </div>
-                    <div className="explore-compact-actions">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                        title="Download audio directly to library"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void startDownloadTask(vid, "audio", "320");
-                        }}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                        title="Watch video"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          watchVideo(vid);
-                        }}
-                      >
-                        <Play className="h-4 w-4 fill-current ml-0.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              }
             </>
           )}
 
@@ -1615,37 +1432,15 @@ function MusicApp() {
                   <p className="eyebrow">LISTENER PROFILE</p>
                   <h1>Profile & Sound</h1>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn relative shrink-0"
-                    title="Download queue"
-                    onClick={() => setQueueDrawerOpen(true)}
-                  >
-                    <Download className="h-4 w-4" />
-                    {downloadQueue.filter(
-                      (d) => d.status === "downloading" || d.status === "saving",
-                    ).length > 0 && (
-                      <span className="top-action-badge animate-pulse">
-                        {
-                          downloadQueue.filter(
-                            (d) => d.status === "downloading" || d.status === "saving",
-                          ).length
-                        }
-                      </span>
-                    )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="glass-icon-btn"
-                    title="Settings"
-                    onClick={() => go("settings")}
-                  >
-                    <Settings2 />
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="glass-icon-btn"
+                  title="Settings"
+                  onClick={() => go("settings")}
+                >
+                  <Settings2 />
+                </Button>
               </header>
 
               <div className="profile-card">
@@ -1679,98 +1474,17 @@ function MusicApp() {
                 )}
               </div>
 
-              {/* Live Download Manager & Queue */}
-              <div className="settings-group">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Download className="h-4 w-4 text-emerald-500" />
-                    <h3 className="text-base font-bold">Downloads & Offline Queue</h3>
-                  </div>
-                  {downloadQueue.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs h-7"
-                      onClick={() => setQueueDrawerOpen(true)}
-                    >
-                      View queue ({downloadQueue.length})
-                    </Button>
-                  )}
-                </div>
-
-                {downloadQueue.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No active downloads. Songs queued from Explore will appear here with progress
-                    tracking.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {downloadQueue.slice(0, 3).map((item) => (
-                      <div key={item.id} className="queue-item-card">
-                        <img src={item.thumbnail} alt="" className="queue-item-thumb" />
-                        <div className="queue-item-info">
-                          <strong className="queue-item-title">{item.title}</strong>
-                          <div className="queue-item-status">
-                            {item.status === "downloading" && (
-                              <>
-                                <Loader2 className="h-3 w-3 animate-spin text-emerald-500" />
-                                <span>Downloading ({item.progress}%)</span>
-                              </>
-                            )}
-                            {item.status === "saving" && (
-                              <>
-                                <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                                <span>Embedding artwork & saving to library...</span>
-                              </>
-                            )}
-                            {item.status === "completed" && (
-                              <span className="text-emerald-500 font-semibold flex items-center gap-1">
-                                <Check className="h-3 w-3" /> Saved in Library
-                              </span>
-                            )}
-                            {item.status === "error" && (
-                              <span className="text-red-500 text-xs">{item.error || "Failed"}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {downloadQueue.length > 3 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs mt-1"
-                        onClick={() => setQueueDrawerOpen(true)}
-                      >
-                        See all {downloadQueue.length} items in queue
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* App & Device Permissions */}
-              <div className="settings-group">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                    <div>
-                      <h3 className="text-base font-bold">App & Device Permissions</h3>
-                      <p className="text-xs text-muted-foreground">
-                        Space storage, sound, notifications, camera
-                      </p>
+              {downloads.length > 0 && (
+                <div className="download-activity">
+                  <h2>Downloads</h2>
+                  {downloads.map((item) => (
+                    <div key={item.id}>
+                      <span title={item.title}>{item.title}</span>
+                      <small>{item.status}</small>
                     </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => setPermissionsModalOpen(true)}
-                  >
-                    Manage
-                  </Button>
+                  ))}
                 </div>
-              </div>
+              )}
 
               {/* Listening Statistics */}
               <div className="stats-grid">
@@ -2167,18 +1881,22 @@ function MusicApp() {
                         <span>Back</span>
                       </Button>
                       <div className="min-w-0">
-                        <p className="eyebrow">NOW PLAYING</p>
-                        <h1 className="truncate max-w-[450px] text-lg font-bold">
+                        <p className="eyebrow flex items-center gap-1.5">
+                          <Youtube className="h-3.5 w-3.5 text-red-500" /> ONLINE PLAYER
+                        </p>
+                        <h1 className="truncate max-w-[500px] text-lg font-bold">
                           {activeWatchVideo.title}
                         </h1>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        className="download-cta-btn h-9 px-4 text-xs font-semibold"
-                        onClick={() => void startDownloadTask(activeWatchVideo, "audio", "320")}
+                        variant="outline"
+                        size="sm"
+                        className="download-cta-btn"
+                        onClick={() => openDownloadModal(activeWatchVideo, "video")}
                       >
-                        <Download className="h-3.5 w-3.5 mr-1.5" /> Download Song
+                        <Download className="h-4 w-4" /> Download Media
                       </Button>
                     </div>
                   </header>
@@ -2199,7 +1917,8 @@ function MusicApp() {
                         <div className="watch-title-row">
                           <h1>{activeWatchVideo.title}</h1>
                           <div className="watch-subinfo">
-                            <span className="font-semibold text-foreground">
+                            <span className="font-semibold text-foreground flex items-center gap-1.5">
+                              <Youtube className="h-4 w-4 text-red-500" />
                               {activeWatchVideo.channel}
                             </span>
                             {activeWatchVideo.duration && (
@@ -2212,16 +1931,16 @@ function MusicApp() {
                         <div className="watch-actions-bar">
                           <Button
                             className="download-cta-btn"
-                            onClick={() => void startDownloadTask(activeWatchVideo, "audio", "320")}
+                            onClick={() => openDownloadModal(activeWatchVideo, "video")}
                           >
-                            <Download className="h-4 w-4 mr-1.5" /> Download Song to Library
+                            <Download className="h-4 w-4" /> Download Video
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => openDownloadModal(activeWatchVideo, "video")}
+                            onClick={() => openDownloadModal(activeWatchVideo, "audio")}
                           >
-                            <Film className="mr-1.5 h-4 w-4" /> Download Video
+                            <Music className="mr-1.5 h-4 w-4 text-emerald-500" /> Download Audio
                           </Button>
                           <Button
                             variant="outline"
@@ -2704,19 +2423,8 @@ function MusicApp() {
                 </>
               ) : (
                 <>
-                  <div className="cover-stage">
-                    <div
-                      className={`sound-aura ${p.playing ? "sound-aura-playing" : ""}`}
-                      aria-hidden="true"
-                    >
-                      <div className="aura-ring ring-1" />
-                      <div className="aura-ring ring-2" />
-                      <div className="aura-ring ring-3" />
-                      <div className="aura-glow" />
-                    </div>
-                    <div className="large-cover">
-                      <Art track={p.current} />
-                    </div>
+                  <div className="large-cover">
+                    <Art track={p.current} />
                   </div>
                   <div className="song-heading">
                     <div>
@@ -3167,373 +2875,20 @@ function MusicApp() {
         </div>
       )}
 
-      {/* Download Queue Drawer Modal */}
-      {queueDrawerOpen && (
-        <div className="download-sheet-backdrop" onClick={() => setQueueDrawerOpen(false)}>
-          <div
-            className="download-sheet download-queue-drawer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="download-sheet-header">
-              <div className="flex items-center gap-2">
-                <Download className="text-emerald-500 h-5 w-5" />
-                <h3 className="text-base font-bold">Download Queue</h3>
-                {downloadQueue.length > 0 && (
-                  <span className="text-xs bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full font-semibold">
-                    {downloadQueue.length}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                {downloadQueue.some((d) => d.status === "completed" || d.status === "error") && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs h-8 text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      setDownloadQueue((prev) =>
-                        prev.filter((d) => d.status === "downloading" || d.status === "saving"),
-                      )
-                    }
-                  >
-                    Clear finished
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setQueueDrawerOpen(false)}
-                  title="Close"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="download-sheet-body max-h-[60vh] overflow-y-auto">
-              {downloadQueue.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  <Download className="h-10 w-10 mx-auto mb-2 opacity-40 text-emerald-500" />
-                  <p className="font-semibold text-sm">No downloads in queue</p>
-                  <p className="text-xs mt-1">Explore songs and tap Download to queue them here.</p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2.5">
-                  {downloadQueue.map((task) => (
-                    <div key={task.id} className="queue-item-card">
-                      <img src={task.thumbnail} alt="" className="queue-item-thumb" />
-                      <div className="queue-item-info">
-                        <strong className="queue-item-title">{task.title}</strong>
-                        <div className="flex items-center justify-between text-xs text-muted-foreground mt-0.5">
-                          <span>
-                            {task.channel} · {task.quality}
-                            {task.type === "video" ? "p MP4" : "kbps MP3"}
-                          </span>
-                          {task.status === "downloading" && (
-                            <span className="text-emerald-500 font-semibold">{task.progress}%</span>
-                          )}
-                        </div>
-                        {task.status === "downloading" && (
-                          <div className="w-full bg-black/10 dark:bg-white/10 h-1.5 rounded-full overflow-hidden mt-1.5">
-                            <div
-                              className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                              style={{ width: `${task.progress}%` }}
-                            />
-                          </div>
-                        )}
-                        {task.status === "saving" && (
-                          <div className="flex items-center gap-1.5 text-xs text-blue-500 mt-1">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Embedding artwork & saving to library...</span>
-                          </div>
-                        )}
-                        {task.status === "completed" && (
-                          <div className="flex items-center justify-between mt-1">
-                            <span className="text-xs text-emerald-500 font-semibold flex items-center gap-1">
-                              <Check className="h-3 w-3" /> Saved to Library
-                            </span>
-                          </div>
-                        )}
-                        {task.status === "error" && (
-                          <span className="text-xs text-red-500 mt-1 block">
-                            {task.error || "Download failed"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* App & Device Permissions Modal */}
-      {permissionsModalOpen && (
-        <div className="download-sheet-backdrop" onClick={() => setPermissionsModalOpen(false)}>
-          <div className="download-sheet permissions-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="download-sheet-header">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="text-emerald-500 h-5 w-5" />
-                <h3 className="text-base font-bold">App & Device Permissions</h3>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setPermissionsModalOpen(false)}
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="download-sheet-body">
-              <p className="text-xs text-muted-foreground mb-3">
-                Configure Capacitor and device permissions for offline music storage, dynamic
-                soundscapes, and notifications.
-              </p>
-
-              <div className="flex flex-col gap-2.5">
-                {/* Storage & Space Permission */}
-                <div className="p-3.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                      <FolderPlus className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <strong className="block text-sm">Storage & Space</strong>
-                      <span className="text-xs text-muted-foreground">
-                        IndexedDB offline library & audio caching
-                      </span>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                    Granted
-                  </span>
-                </div>
-
-                {/* Sound & Audio Permission */}
-                <div className="p-3.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                      <Volume2 className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <strong className="block text-sm">Sound & Equalizer</strong>
-                      <span className="text-xs text-muted-foreground">
-                        Web Audio API engine & crossfade automix
-                      </span>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                    Granted
-                  </span>
-                </div>
-
-                {/* Notifications Permission */}
-                <div className="p-3.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-purple-500/15 flex items-center justify-center text-purple-600 dark:text-purple-400">
-                      <Tv className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <strong className="block text-sm">Notifications & Media Bar</strong>
-                      <span className="text-xs text-muted-foreground">
-                        Lock screen notch & playback alerts
-                      </span>
-                    </div>
-                  </div>
-                  {permissionsState.notifications ? (
-                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                      Granted
-                    </span>
-                  ) : (
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs px-3"
-                      onClick={() => requestPermission("notifications")}
-                    >
-                      Grant
-                    </Button>
-                  )}
-                </div>
-
-                {/* Camera & Artwork Permission */}
-                <div className="p-3.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                      <Sparkles className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <strong className="block text-sm">Camera & Custom Covers</strong>
-                      <span className="text-xs text-muted-foreground">
-                        Photo capture for album artwork
-                      </span>
-                    </div>
-                  </div>
-                  {permissionsState.camera ? (
-                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-                      Granted
-                    </span>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs px-3"
-                      onClick={() => requestPermission("camera")}
-                    >
-                      Request
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <Button
-                className="w-full mt-4 h-10 text-xs font-semibold justify-center"
-                onClick={() => setPermissionsModalOpen(false)}
-              >
-                Save & Done
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* In-App Direct Download to Library Modal */}
-      {directDownloadOpen && (
-        <div className="download-sheet-backdrop" onClick={() => setDirectDownloadOpen(false)}>
-          <div className="download-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="download-sheet-header">
-              <div className="flex items-center gap-2">
-                <Download className="text-emerald-500 h-5 w-5" />
-                <h3 className="text-base font-bold">Download Inside Library</h3>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setDirectDownloadOpen(false)}
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="download-sheet-body">
-              <p className="text-xs text-muted-foreground mb-3">
-                Download any song directly into your SPOILED library with high-fidelity audio and
-                embedded album artwork.
-              </p>
-
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const q = directDownloadQuery.trim();
-                  if (!q || directDownloadLoading) return;
-                  setDirectDownloadLoading(true);
-                  try {
-                    const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(q)}`);
-                    const data = await res.json();
-                    const topMatch = data.videos?.[0];
-                    if (topMatch) {
-                      setDirectDownloadOpen(false);
-                      setDirectDownloadQuery("");
-                      void startDownloadTask(topMatch, "audio", "320");
-                    } else {
-                      setMessage("No matches found for that song query");
-                    }
-                  } catch {
-                    setMessage("Could not start download");
-                  } finally {
-                    setDirectDownloadLoading(false);
-                  }
-                }}
-                className="flex flex-col gap-3"
-              >
-                <div className="relative">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    autoFocus
-                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-white/40 dark:bg-white/5 border border-white/60 dark:border-white/10 text-sm outline-none placeholder:text-muted-foreground focus:border-emerald-500"
-                    placeholder="Enter song name, artist, or audio search…"
-                    value={directDownloadQuery}
-                    onChange={(e) => setDirectDownloadQuery(e.target.value)}
-                  />
-                </div>
-
-                <Button
-                  type="submit"
-                  className="download-cta-btn justify-center h-11 text-sm font-semibold"
-                  disabled={directDownloadLoading || !directDownloadQuery.trim()}
-                >
-                  {directDownloadLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Finding & Downloading…
-                    </>
-                  ) : (
-                    <>
-                      <Download className="mr-2 h-4 w-4" /> Download to Library Now
-                    </>
-                  )}
-                </Button>
-              </form>
-
-              <div className="mt-4 pt-3 border-t border-white/40 dark:border-white/10">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">
-                  Quick One-Click Downloads
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "Billie Eilish Birds of a Feather",
-                    "The Weeknd Blinding Lights",
-                    "Kendrick Lamar Not Like Us",
-                    "Marconi Union Weightless",
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/50 dark:bg-white/10 border border-white/50 dark:border-white/15 hover:border-emerald-500 hover:text-emerald-500 transition-colors"
-                      onClick={async () => {
-                        setDirectDownloadOpen(false);
-                        try {
-                          const res = await fetch(
-                            `/api/youtube/search?q=${encodeURIComponent(preset)}`,
-                          );
-                          const data = await res.json();
-                          if (data.videos?.[0]) {
-                            void startDownloadTask(data.videos[0], "audio", "320");
-                          }
-                        } catch {
-                          /* ignore */
-                        }
-                      }}
-                    >
-                      + {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Mobile Bottom Navigation (Home, Library, Explore, Profile) */}
-      {!["now", "lyrics", "queue"].includes(screen) && (
-        <nav className="bottom-nav" aria-label="Main navigation">
-          {nav.map(({ screen: s, label, icon: Icon }) => (
-            <Button
-              variant="ghost"
-              key={s}
-              onClick={() => go(s)}
-              className={activeNav === s ? "active" : ""}
-            >
-              <Icon />
-              <span>{label}</span>
-            </Button>
-          ))}
-        </nav>
-      )}
+      <nav className="bottom-nav" aria-label="Main navigation">
+        {nav.map(({ screen: s, label, icon: Icon }) => (
+          <Button
+            variant="ghost"
+            key={s}
+            onClick={() => go(s)}
+            className={activeNav === s ? "active" : ""}
+          >
+            <Icon />
+            <span>{label}</span>
+          </Button>
+        ))}
+      </nav>
     </div>
   );
 }

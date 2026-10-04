@@ -4611,9 +4611,7 @@ body,
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border: 1px solid rgba(0, 0, 0, 0.12) !important;
-  box-shadow:
-    0 16px 36px -4px rgba(0, 0, 0, 0.25),
-    0 4px 12px -2px rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.25), 0 4px 12px -2px rgba(0, 0, 0, 0.1) !important;
   padding: 6px !important;
 }
 
@@ -4708,18 +4706,11 @@ body,
 .btn-liquid-glass,
 .topline .glass-icon-btn,
 .page-head .glass-icon-btn {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.8) 0%,
-    rgba(255, 255, 255, 0.45) 100%
-  ) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.45) 100%) !important;
   backdrop-filter: blur(28px) saturate(190%) brightness(104%) !important;
   -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(104%) !important;
   border: 1px solid rgba(255, 255, 255, 0.9) !important;
-  box-shadow:
-    0 8px 24px -4px rgba(60, 85, 120, 0.14),
-    inset 0 1.5px 2px rgba(255, 255, 255, 0.95),
-    inset 0 -1px 2px rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 8px 24px -4px rgba(60, 85, 120, 0.14), inset 0 1.5px 2px rgba(255, 255, 255, 0.95), inset 0 -1px 2px rgba(255, 255, 255, 0.35) !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
@@ -4727,30 +4718,18 @@ body,
 .dark .btn-liquid-glass,
 .dark .topline .glass-icon-btn,
 .dark .page-head .glass-icon-btn {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.16) 0%,
-    rgba(255, 255, 255, 0.05) 100%
-  ) !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.05) 100%) !important;
   backdrop-filter: blur(28px) saturate(180%) brightness(95%) !important;
   -webkit-backdrop-filter: blur(28px) saturate(180%) brightness(95%) !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow:
-    0 8px 24px -4px rgba(0, 0, 0, 0.5),
-    inset 0 1px 1.5px rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 1.5px rgba(255, 255, 255, 0.25) !important;
 }
 
 .glass-icon-btn:hover,
 .btn-liquid-glass:hover {
   transform: translateY(-1.5px) !important;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.92) 0%,
-    rgba(255, 255, 255, 0.6) 100%
-  ) !important;
-  box-shadow:
-    0 12px 28px -4px rgba(60, 85, 120, 0.2),
-    inset 0 1.5px 2px #ffffff !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.6) 100%) !important;
+  box-shadow: 0 12px 28px -4px rgba(60, 85, 120, 0.2), inset 0 1.5px 2px #ffffff !important;
 }
 
 /* ==========================================================================

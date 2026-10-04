@@ -752,8 +752,14 @@ function MusicApp() {
       if (!/^(audio|video)\//.test(mime) || blob.size < 10000) {
         throw new Error("The server didn't return a playable file.");
       }
-      const isM4a = mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac");
-      const ext = type === "audio" ? (isM4a ? "m4a" : "mp3") : "mp4";
+      const ext =
+        type === "audio"
+          ? mime.includes("webm") || mime.includes("opus")
+            ? "webm"
+            : mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac")
+              ? "m4a"
+              : "mp3"
+          : "mp4";
       const sanitized = video.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
       void exportFile;
 
@@ -777,7 +783,8 @@ function MusicApp() {
         }
 
         const file = new File([blob], `${sanitized}.${ext}`, {
-          type: ext === "mp3" ? "audio/mpeg" : "audio/mp4",
+          type:
+          ext === "mp3" ? "audio/mpeg" : ext === "webm" ? "audio/webm" : "audio/mp4",
         });
 
         const createdTrack = await p.addTrackWithArtwork(file, pictureBlob, {

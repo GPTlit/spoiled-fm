@@ -595,17 +595,30 @@ export default {
       const commonArgs = [
         "--js-runtimes",
         `node:${nodePath}`,
+        "--extractor-args",
+        "youtube:player_client=web_creator,web",
         "--no-check-certificates",
         "--geo-bypass",
         "--no-playlist",
+        "--no-warnings",
       ];
 
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
       if (type === "audio") {
         // Native AAC stream (itag 140) needs no ffmpeg transcoding, so audio is never silent.
+        // Prefer a standalone audio stream so the exact video can be downloaded
+        // without requiring a video merge. Keep webm as a valid fallback because
+        // many current YouTube videos no longer expose the legacy AAC stream.
         ext = "m4a";
-        args = [...commonArgs, "-f", "140/bestaudio[ext=m4a]/bestaudio", "-o", templateOutput, videoUrl];
+        args = [
+          ...commonArgs,
+          "-f",
+          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+          "-o",
+          templateOutput,
+          videoUrl,
+        ];
       } else {
         ext = "mp4";
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";
@@ -630,7 +643,9 @@ export default {
           await execFileAsync("python3", [binaryPath, ...args], { timeout: 90000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
           const found = tmpFiles.find(
-            (f) => f.startsWith(basePrefix) && (f.endsWith(".mp3") || f.endsWith(".m4a")),
+            (f) =>
+              f.startsWith(basePrefix) &&
+              (f.endsWith(".mp3") || f.endsWith(".m4a") || f.endsWith(".webm") || f.endsWith(".opus")),
           );
           if (found) {
             const actualFile = path.resolve("/tmp", found);

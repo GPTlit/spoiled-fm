@@ -249,13 +249,10 @@ function MusicApp() {
     const track = p.library.find((item) => !pending.previousIds.has(item.id));
     if (!track) return;
     pendingArtwork.current = null;
-    void fetch(pending.thumbnail)
-      .then((response) => {
-        if (!response.ok) throw new Error("Artwork unavailable");
-        return response.blob();
-      })
-      .then((blob) => p.setTrackArtwork(track.id, blob))
-      .catch(() => {});
+    void fetch(pending.thumbnail).then((response) => {
+      if (!response.ok) throw new Error("Artwork unavailable");
+      return response.blob();
+    }).then((blob) => p.setTrackArtwork(track.id, blob)).catch(() => {});
   }, [p.library]);
 
   // Synchronized Lyrics
@@ -269,16 +266,7 @@ function MusicApp() {
       const activeEl = lrcContainerRef.current.children[activeLrcIndex] as HTMLElement;
       if (activeEl) {
         const container = lrcContainerRef.current;
-        container.scrollTo({
-          top:
-            activeEl.offsetTop -
-            container.offsetTop -
-            container.clientHeight / 2 +
-            activeEl.clientHeight / 2,
-          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? "instant"
-            : "smooth",
-        });
+        container.scrollTo({ top: activeEl.offsetTop - container.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
       }
     }
   }, [activeLrcIndex]);
@@ -431,8 +419,7 @@ function MusicApp() {
 
   const playerOrigin = useRef<Screen>("home");
   const go = (next: Screen) => {
-    if (["now", "lyrics", "queue"].includes(next) && !["now", "lyrics", "queue"].includes(screen))
-      playerOrigin.current = screen;
+    if (["now", "lyrics", "queue"].includes(next) && !["now", "lyrics", "queue"].includes(screen)) playerOrigin.current = screen;
     setPrevious(screen);
     setScreen(next);
     setMenu(null);
@@ -508,9 +495,7 @@ function MusicApp() {
     }
   }, []);
 
-  useEffect(() => {
-    void searchOnlineVideos("music");
-  }, [searchOnlineVideos]);
+  useEffect(() => { void searchOnlineVideos("music"); }, [searchOnlineVideos]);
 
   const watchVideo = (video: OnlineVideo, pip = false) => {
     if (p.playing) p.toggle(); // Gracefully pause local audio when watching video
@@ -569,10 +554,7 @@ function MusicApp() {
   const handleDownloadFile = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
-    setDownloads((items) => [
-      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" },
-      ...items.filter((item) => item.id !== downloadModalVideo.id),
-    ]);
+    setDownloads((items) => [{ id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" }, ...items.filter((item) => item.id !== downloadModalVideo.id)]);
     setDownloadModalOpen(false);
     setDownloadProgressText(
       downloadType === "audio"
@@ -585,11 +567,7 @@ function MusicApp() {
       const res = await fetch(url);
 
       if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
+        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item));
         setMessage("Download unavailable. You can add audio files you own to your library.");
         return;
       }
@@ -609,20 +587,12 @@ function MusicApp() {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Saved to device" } : item,
-        ),
-      );
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Saved to device" } : item));
       setMessage(`Downloaded "${filename}" successfully!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
       console.error("Download error:", err);
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
-        ),
-      );
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item));
       setMessage("Download failed. Please try again later.");
     } finally {
       setDownloadInProgress(false);
@@ -633,10 +603,7 @@ function MusicApp() {
   const handleSaveToLocalLibrary = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
-    setDownloads((items) => [
-      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Adding to library" },
-      ...items.filter((item) => item.id !== downloadModalVideo.id),
-    ]);
+    setDownloads((items) => [{ id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Adding to library" }, ...items.filter((item) => item.id !== downloadModalVideo.id)]);
     setDownloadModalOpen(false);
     setDownloadProgressText("Importing audio into your library...");
 
@@ -644,11 +611,7 @@ function MusicApp() {
       const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
       const res = await fetch(url);
       if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
+        setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item));
         setMessage("Audio isn't available for import. Add an audio file you own instead.");
         return;
       }
@@ -659,20 +622,12 @@ function MusicApp() {
       await p.addFiles([file]);
       // The imported track is committed on the next render.
       pendingArtwork.current = { previousIds: before, thumbnail: downloadModalVideo.thumbnail };
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item,
-        ),
-      );
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item));
       setMessage(`"${downloadModalVideo.title}" added to your local library!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
       console.error("Save to library error:", err);
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
-        ),
-      );
+      setDownloads((items) => items.map((item) => item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item));
       setMessage("Audio couldn't be imported. Add an audio file you own instead.");
     } finally {
       setDownloadInProgress(false);
@@ -929,9 +884,7 @@ function MusicApp() {
   const isDark = theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
 
   return (
-    <div
-      className={`app-shell ${isDark ? "dark" : ""} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
-    >
+    <div className={`app-shell ${isDark ? "dark" : ""} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}>
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
         <div className="orb orb-2" />
@@ -1306,51 +1259,25 @@ function MusicApp() {
 
               <div className="video-search-bar">
                 <div className="video-search-input-wrap">
-                  <input
-                    aria-label="Search videos"
-                    placeholder="Search songs, artists or videos…"
-                    value={youtubeQuery}
-                    onChange={(e) => setYoutubeQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void searchOnlineVideos(youtubeQuery);
-                    }}
-                  />
+                  <input aria-label="Search videos" placeholder="Search songs, artists or videos…" value={youtubeQuery} onChange={(e) => setYoutubeQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void searchOnlineVideos(youtubeQuery); }} />
                 </div>
-                <Button
-                  className="video-search-btn"
-                  onClick={() => void searchOnlineVideos(youtubeQuery)}
-                  disabled={onlineLoading}
-                >
-                  <Search className="h-4 w-4" /> Search
-                </Button>
+                <Button className="video-search-btn" onClick={() => void searchOnlineVideos(youtubeQuery)} disabled={onlineLoading}><Search className="h-4 w-4" /> Search</Button>
               </div>
-              <div className="section-title">
-                <h2>Videos</h2>
-              </div>
+              <div className="section-title"><h2>Videos</h2></div>
               {onlineLoading && <p className="muted-note">Loading videos…</p>}
-              {!onlineLoading && onlineVideos.length === 0 && (
-                <p className="muted-note">
-                  No videos available right now. Search for something else.
-                </p>
-              )}
-              {downloads.length > 0 && (
-                <div className="download-activity">
-                  <h2>Downloads</h2>
-                  {downloads.map((item) => (
-                    <div key={item.id}>
-                      <span title={item.title}>{item.title}</span>
-                      <small>{item.status}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {
+              {!onlineLoading && onlineVideos.length === 0 && <p className="muted-note">No videos available right now. Search for something else.</p>}
+              {downloads.length > 0 && <div className="download-activity"><h2>Downloads</h2>{downloads.map((item) => <div key={item.id}><span title={item.title}>{item.title}</span><small>{item.status}</small></div>)}</div>}
+              {(
+
                 <div>
                   {/* Online Video Grid if searched */}
                   {onlineVideos.length > 0 && (
                     <div>
                       <div className="section-title">
-                        <h2 className="flex items-center gap-2">Videos ({onlineVideos.length})</h2>
+                        <h2 className="flex items-center gap-2">
+                          Videos (
+                          {onlineVideos.length})
+                        </h2>
                         {onlineLoading && (
                           <span className="text-xs text-muted-foreground animate-pulse">
                             Searching…
@@ -1420,7 +1347,8 @@ function MusicApp() {
                     </div>
                   )}
                 </div>
-              }
+              )}
+
             </>
           )}
 
@@ -1474,17 +1402,7 @@ function MusicApp() {
                 )}
               </div>
 
-              {downloads.length > 0 && (
-                <div className="download-activity">
-                  <h2>Downloads</h2>
-                  {downloads.map((item) => (
-                    <div key={item.id}>
-                      <span title={item.title}>{item.title}</span>
-                      <small>{item.status}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {downloads.length > 0 && <div className="download-activity"><h2>Downloads</h2>{downloads.map((item) => <div key={item.id}><span title={item.title}>{item.title}</span><small>{item.status}</small></div>)}</div>}
 
               {/* Listening Statistics */}
               <div className="stats-grid">
@@ -2230,14 +2148,7 @@ function MusicApp() {
                 <div className="settings-row">
                   <SlidersHorizontal />
                   <span>Transitions</span>
-                  <select
-                    aria-label="Transition mode"
-                    value={p.mixMode}
-                    onChange={(e) => p.setMixMode(e.target.value as "crossfade" | "automix")}
-                  >
-                    <option value="crossfade">Crossfade</option>
-                    <option value="automix">AutoMix</option>
-                  </select>
+                  <select aria-label="Transition mode" value={p.mixMode} onChange={(e) => p.setMixMode(e.target.value as "crossfade" | "automix")}><option value="crossfade">Crossfade</option><option value="automix">AutoMix</option></select>
                 </div>
                 <div className="settings-row">
                   <Volume2 />
@@ -2278,19 +2189,14 @@ function MusicApp() {
           )}
 
           {(screen === "now" || screen === "lyrics" || screen === "queue") && (
-            <div
-              className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""} ${screen === "queue" ? "queue-screen" : ""}`}
-            >
+            <div className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""} ${screen === "queue" ? "queue-screen" : ""}`}>
               <div className="player-top">
                 <Button
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
                   title="Close player"
-                  onClick={() => {
-                    setScreen(playerOrigin.current);
-                    setMenu(null);
-                  }}
+                  onClick={() => { setScreen(playerOrigin.current); setMenu(null); }}
                 >
                   <ChevronDown />
                 </Button>
@@ -2506,18 +2412,7 @@ function MusicApp() {
                     <Button variant="ghost" onClick={() => go("queue")}>
                       <ListMusic className="mr-1 h-4 w-4" /> Queue
                     </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setInfoDraft({
-                          title: p.current?.title ?? "",
-                          artist: p.current?.artist ?? "",
-                          album: p.current?.album ?? "",
-                        });
-                        setEditInfo(true);
-                      }}
-                      disabled={!p.current}
-                    >
+                    <Button variant="ghost" onClick={() => { setInfoDraft({ title: p.current?.title ?? "", artist: p.current?.artist ?? "", album: p.current?.album ?? "" }); setEditInfo(true); }} disabled={!p.current}>
                       <SlidersHorizontal className="mr-1 h-4 w-4" /> Info
                     </Button>
                   </div>
@@ -2576,65 +2471,7 @@ function MusicApp() {
         </div>
       )}
 
-      {editInfo && p.current && (
-        <div className="download-sheet-backdrop" onClick={() => setEditInfo(false)}>
-          <form
-            className="download-sheet info-sheet"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!p.current) return;
-              void p
-                .updateTrackInfo(p.current.id, {
-                  title: infoDraft.title.trim() || p.current.title,
-                  artist: infoDraft.artist.trim() || p.current.artist,
-                  album: infoDraft.album.trim() || p.current.album,
-                })
-                .then(() => {
-                  setEditInfo(false);
-                  setMessage("Song info saved");
-                });
-            }}
-          >
-            <div className="download-sheet-header">
-              <h3>Song info</h3>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setEditInfo(false)}
-                title="Close"
-              >
-                <X />
-              </Button>
-            </div>
-            <div className="info-fields">
-              <label>
-                Title
-                <input
-                  value={infoDraft.title}
-                  onChange={(e) => setInfoDraft({ ...infoDraft, title: e.target.value })}
-                />
-              </label>
-              <label>
-                Artist
-                <input
-                  value={infoDraft.artist}
-                  onChange={(e) => setInfoDraft({ ...infoDraft, artist: e.target.value })}
-                />
-              </label>
-              <label>
-                Album
-                <input
-                  value={infoDraft.album}
-                  onChange={(e) => setInfoDraft({ ...infoDraft, album: e.target.value })}
-                />
-              </label>
-              <Button type="submit">Save</Button>
-            </div>
-          </form>
-        </div>
-      )}
+      {editInfo && p.current && <div className="download-sheet-backdrop" onClick={() => setEditInfo(false)}><form className="download-sheet info-sheet" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (!p.current) return; void p.updateTrackInfo(p.current.id, { title: infoDraft.title.trim() || p.current.title, artist: infoDraft.artist.trim() || p.current.artist, album: infoDraft.album.trim() || p.current.album }).then(() => { setEditInfo(false); setMessage("Song info saved"); }); }}><div className="download-sheet-header"><h3>Song info</h3><Button type="button" variant="ghost" size="icon" onClick={() => setEditInfo(false)} title="Close"><X /></Button></div><div className="info-fields"><label>Title<input value={infoDraft.title} onChange={(e) => setInfoDraft({ ...infoDraft, title: e.target.value })} /></label><label>Artist<input value={infoDraft.artist} onChange={(e) => setInfoDraft({ ...infoDraft, artist: e.target.value })} /></label><label>Album<input value={infoDraft.album} onChange={(e) => setInfoDraft({ ...infoDraft, album: e.target.value })} /></label><Button type="submit">Save</Button></div></form></div>}
 
       {/* Download Quality Selector Modal */}
       {downloadModalOpen && downloadModalVideo && (
@@ -2826,6 +2663,8 @@ function MusicApp() {
                     </>
                   )}
                 </Button>
+
+
 
                 {downloadType === "audio" && (
                   <Button

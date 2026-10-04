@@ -1172,9 +1172,9 @@
 .row-menu {
   position: absolute;
   right: 12px;
-  top: 56px;
+  top: calc(100% - 8px);
   min-width: 200px;
-  z-index: 30;
+  z-index: 60;
   padding: 8px;
   background: var(--popover);
   backdrop-filter: var(--liquid-glass-blur);

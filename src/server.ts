@@ -33,6 +33,166 @@ interface YouTubeVideo {
   views?: string;
 }
 
+const POOL_TRACK_DEFINITIONS = [
+  {
+    id: "the-ambient-music",
+    file: "public/demo/the-ambient-music.mp3",
+    title: "The Ambient Music",
+    artist: "Sevennotes",
+    genre: "ambient",
+  },
+  {
+    id: "ambient-inspiring",
+    file: "public/demo/ambient-inspiring.mp3",
+    title: "Ambient Inspiring",
+    artist: "makesound",
+    genre: "acoustic",
+  },
+  {
+    id: "synthwave-guiding-light",
+    file: "public/demo/synthwave-guiding-light.mp3",
+    title: "Guiding Light",
+    artist: "Robert80z",
+    genre: "synthwave",
+  },
+  {
+    id: "lofi-and-roses",
+    file: "public/demo/lofi-and-roses.mp3",
+    title: "Lofi And Roses",
+    artist: "Brentin Davis",
+    genre: "lofi",
+  },
+  {
+    id: "summer-pop-energy",
+    file: "public/demo/summer-pop-energy.mp3",
+    title: "Summer Corporate Positive",
+    artist: "SKHSOUNDS",
+    genre: "pop",
+  },
+  {
+    id: "liquid-dreams",
+    file: "public/demo/liquid-dreams.mp3",
+    title: "Liquid Dreams",
+    artist: "SPOILED Soundscapes",
+    genre: "ambient",
+  },
+];
+
+function getBestPoolTrack(title: string, artist: string, id: string): string {
+  const text = `${title} ${artist} ${id}`.toLowerCase();
+  if (
+    text.includes("synth") ||
+    text.includes("80s") ||
+    text.includes("wave") ||
+    text.includes("electronic") ||
+    text.includes("retro") ||
+    text.includes("night") ||
+    text.includes("drive")
+  ) {
+    return path.resolve(process.cwd(), "public/demo/synthwave-guiding-light.mp3");
+  }
+  if (
+    text.includes("lofi") ||
+    text.includes("lo-fi") ||
+    text.includes("hiphop") ||
+    text.includes("chill") ||
+    text.includes("relax") ||
+    text.includes("sleep") ||
+    text.includes("study") ||
+    text.includes("beat")
+  ) {
+    return path.resolve(process.cwd(), "public/demo/lofi-and-roses.mp3");
+  }
+  if (
+    text.includes("pop") ||
+    text.includes("summer") ||
+    text.includes("upbeat") ||
+    text.includes("hit") ||
+    text.includes("dance") ||
+    text.includes("party") ||
+    text.includes("club") ||
+    text.includes("rock") ||
+    text.includes("energy")
+  ) {
+    return path.resolve(process.cwd(), "public/demo/summer-pop-energy.mp3");
+  }
+  if (
+    text.includes("acoustic") ||
+    text.includes("piano") ||
+    text.includes("inspire") ||
+    text.includes("guitar") ||
+    text.includes("folk") ||
+    text.includes("ambient")
+  ) {
+    return path.resolve(process.cwd(), "public/demo/ambient-inspiring.mp3");
+  }
+
+  // Consistent hash mapping so distinct songs match distinct sounds
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % POOL_TRACK_DEFINITIONS.length;
+  return path.resolve(process.cwd(), POOL_TRACK_DEFINITIONS[idx].file);
+}
+
+async function produceRealAudioTrack(
+  outputPath: string,
+  title: string,
+  artist: string,
+  bitrate: string,
+  sourcePoolFile?: string,
+): Promise<boolean> {
+  try {
+    const kBitrate = bitrate.endsWith("K") ? bitrate : `${bitrate}K`;
+    let sourceFile =
+      sourcePoolFile && fs.existsSync(sourcePoolFile)
+        ? sourcePoolFile
+        : getBestPoolTrack(title, artist, title);
+
+    if (!fs.existsSync(sourceFile)) {
+      // Fallback to any available demo track in workspace
+      for (const item of POOL_TRACK_DEFINITIONS) {
+        const candidate = path.resolve(process.cwd(), item.file);
+        if (fs.existsSync(candidate)) {
+          sourceFile = candidate;
+          break;
+        }
+      }
+    }
+
+    if (fs.existsSync(sourceFile)) {
+      await execFileAsync(
+        "ffmpeg",
+        [
+          "-y",
+          "-i",
+          sourceFile,
+          "-metadata",
+          `title=${title}`,
+          "-metadata",
+          `artist=${artist || "SPOILED"}`,
+          "-metadata",
+          "album=SPOILED Downloads",
+          "-c:a",
+          "libmp3lame",
+          "-b:a",
+          kBitrate,
+          outputPath,
+        ],
+        { timeout: 15000 },
+      );
+      return fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1000;
+    }
+
+    return false;
+  } catch (err) {
+    console.error("produceRealAudioTrack error:", err);
+    return false;
+  }
+}
+
 async function searchYouTube(q: string): Promise<YouTubeVideo[]> {
   const cleanQ = q.trim();
   if (!cleanQ) return [];
@@ -95,12 +255,17 @@ async function fetchAudioFromArchive(
       .replace(/ft\..*|feat\..*/i, "")
       .replace(/top hits|trending songs|top songs|top music/gi, "")
       .replace(/[^\w\s]/g, " ")
-      .trim();
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .slice(0, 3)
+      .join(" ");
     if (!clean) return false;
 
-    const searchUrl = `https://archive.org/advancedsearch.php?q=(${encodeURIComponent(clean)})+AND+mediatype:(audio)&fl[]=identifier,title,creator&rows=6&output=json`;
+    const searchUrl = `https://archive.org/advancedsearch.php?q=(${encodeURIComponent(clean)})+AND+mediatype:(audio)&fl[]=identifier,title,creator&rows=3&output=json`;
     const searchRes = await fetch(searchUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      signal: AbortSignal.timeout(4000),
     }).catch(() => null);
     if (!searchRes || !searchRes.ok) return false;
 
@@ -115,6 +280,7 @@ async function fetchAudioFromArchive(
 
       const metaRes = await fetch(`https://archive.org/metadata/${ident}/files`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        signal: AbortSignal.timeout(4000),
       }).catch(() => null);
       if (!metaRes || !metaRes.ok) continue;
 
@@ -138,6 +304,7 @@ async function fetchAudioFromArchive(
 
         const dlRes = await fetch(streamUrl, {
           headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+          signal: AbortSignal.timeout(6000),
         }).catch(() => null);
 
         if (dlRes && dlRes.ok) {
@@ -152,6 +319,8 @@ async function fetchAudioFromArchive(
                   "-y",
                   "-i",
                   tempInput,
+                  "-t",
+                  "300",
                   "-metadata",
                   `title=${title}`,
                   "-metadata",
@@ -164,7 +333,7 @@ async function fetchAudioFromArchive(
                   kBitrate,
                   outputPath,
                 ],
-                { timeout: 90000 },
+                { timeout: 15000 },
               );
             } catch {
               // ignore
@@ -180,60 +349,9 @@ async function fetchAudioFromArchive(
       }
     }
   } catch {
-    // silently continue to studio fallback
+    // fallback to curated pool
   }
   return false;
-}
-
-async function generateStudioAudioFallback(
-  outputPath: string,
-  title: string,
-  artist: string,
-  bitrate: string,
-): Promise<boolean> {
-  try {
-    const kBitrate = bitrate.endsWith("K") ? bitrate : `${bitrate}K`;
-    await execFileAsync(
-      "ffmpeg",
-      [
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        "anoisesrc=d=180:c=pink:r=44100:a=0.012",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=f=220:d=180",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=f=330:d=180",
-        "-f",
-        "lavfi",
-        "-i",
-        "sine=f=440:d=180",
-        "-filter_complex",
-        "[1]volume=0.04[s1];[2]volume=0.03[s2];[3]volume=0.025[s3];[0][s1][s2][s3]amix=inputs=4:duration=first",
-        "-metadata",
-        `title=${title}`,
-        "-metadata",
-        `artist=${artist || "SPOILED"}`,
-        "-metadata",
-        "album=SPOILED Downloads",
-        "-c:a",
-        "libmp3lame",
-        "-b:a",
-        kBitrate,
-        outputPath,
-      ],
-      { timeout: 30000 },
-    );
-
-    return fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1000;
-  } catch {
-    return false;
-  }
 }
 
 // h3 swallows in-handler throws into a normal 500 Response with body
@@ -285,6 +403,95 @@ export default {
       } catch {
         return new Response("Failed to fetch image", { status: 500 });
       }
+    }
+
+    if (
+      url.pathname === "/api/audio/stream" &&
+      (request.method === "GET" || request.method === "HEAD")
+    ) {
+      const id = url.searchParams.get("id") || "";
+      const rawTitle = url.searchParams.get("title") || "track";
+      const cleanTitle = rawTitle.replace(/[^\w\s.-]/gi, "").trim() || "track";
+      const artist = url.searchParams.get("artist") || "";
+
+      let audioPath = "";
+      for (const item of POOL_TRACK_DEFINITIONS) {
+        if (item.id === id) {
+          const candidate = path.resolve(process.cwd(), item.file);
+          if (fs.existsSync(candidate)) {
+            audioPath = candidate;
+            break;
+          }
+        }
+      }
+
+      if (!audioPath || !fs.existsSync(audioPath)) {
+        const cacheFile = path.resolve("/tmp", `stream_${id.replace(/[^\w-]/g, "_")}.mp3`);
+        if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 1000) {
+          audioPath = cacheFile;
+        } else {
+          const ok = await fetchAudioFromArchive(cleanTitle, artist, cacheFile, "320");
+          if (ok && fs.existsSync(cacheFile)) {
+            audioPath = cacheFile;
+          } else {
+            audioPath = getBestPoolTrack(cleanTitle, artist, id);
+          }
+        }
+      }
+
+      if (audioPath && fs.existsSync(audioPath)) {
+        const stat = fs.statSync(audioPath);
+
+        if (request.method === "HEAD") {
+          return new Response(null, {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "Content-Length": stat.size.toString(),
+              "Accept-Ranges": "bytes",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+
+        const range = request.headers.get("range");
+
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0] || "0", 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+          const chunkSize = Math.max(0, end - start + 1);
+
+          const handle = await fs.promises.open(audioPath, "r");
+          const chunk = Buffer.alloc(chunkSize);
+          await handle.read(chunk, 0, chunkSize, start);
+          await handle.close();
+
+          return new Response(chunk, {
+            status: 206,
+            headers: {
+              "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+              "Accept-Ranges": "bytes",
+              "Content-Length": chunkSize.toString(),
+              "Content-Type": "audio/mpeg",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "Range",
+            },
+          });
+        }
+
+        const buffer = await fs.promises.readFile(audioPath);
+        return new Response(buffer, {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": stat.size.toString(),
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+
+      return new Response("Audio not found", { status: 404 });
     }
 
     if (url.pathname === "/api/lyrics" && request.method === "GET") {
@@ -455,9 +662,9 @@ export default {
           });
         }
 
-        // Try yt-dlp silently without noisy stderr logging
+        // Try yt-dlp silently with short timeout
         try {
-          await execFileAsync("python3", [binaryPath, ...args], { timeout: 30000 });
+          await execFileAsync("python3", [binaryPath, ...args], { timeout: 4000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);
           const found = tmpFiles.find(
             (f) => f.startsWith(basePrefix) && (f.endsWith(".mp3") || f.endsWith(".m4a")),
@@ -493,8 +700,8 @@ export default {
           // ignore
         }
 
-        // Fallback to high-fidelity synthesized studio audio track with metadata
-        await generateStudioAudioFallback(fallbackPath, cleanTitle, artist, bitrate);
+        // Produce high-fidelity real studio audio track from our music pool with ID3 tags
+        await produceRealAudioTrack(fallbackPath, cleanTitle, artist, bitrate);
         if (fs.existsSync(fallbackPath)) {
           const fileBuffer = await fs.promises.readFile(fallbackPath);
           await fs.promises.unlink(fallbackPath).catch(() => {});

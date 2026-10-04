@@ -613,6 +613,28 @@ function MusicApp() {
     void searchOnlineVideos("music");
   }, [searchOnlineVideos]);
 
+  const playOnlineTrack = (video: OnlineVideo) => {
+    const trackId = `stream_${video.id}`;
+    const streamUrl = `/api/audio/stream?id=${encodeURIComponent(video.id)}&title=${encodeURIComponent(video.title)}&artist=${encodeURIComponent(video.channel)}`;
+
+    const existingTrack = p.library.find((t) => t.id === trackId || t.id === video.id);
+    if (existingTrack) {
+      p.playTrack(existingTrack.id);
+    } else {
+      const streamTrack: Track = {
+        id: trackId,
+        title: video.title,
+        artist: video.channel,
+        album: "Online Stream",
+        url: streamUrl,
+        pictureUrl: video.thumbnail,
+        hue: 190,
+      };
+      p.playTrack(streamTrack.id, [streamTrack.id, ...p.queue]);
+    }
+    setMessage(`Playing "${video.title}" in SPOILED player`);
+  };
+
   const watchVideo = (video: OnlineVideo, pip = false) => {
     if (p.playing) p.toggle(); // Gracefully pause local audio when watching video
     setActiveWatchVideo(video);
@@ -1085,6 +1107,11 @@ function MusicApp() {
     ) : (
       <Empty
         onAdd={() => files.current?.click()}
+        onLoadSamples={async () => {
+          setMessage("Loading high-fidelity sample music...");
+          const count = await p.loadSampleMusic();
+          setMessage(`${count} sample songs loaded to your library!`);
+        }}
         label={
           screen === "liked"
             ? "No loved songs yet"
@@ -1437,14 +1464,28 @@ function MusicApp() {
               ) : (
                 <div className="home-empty">
                   <p>Your collection starts with a song.</p>
-                  <Button onClick={() => files.current?.click()}>
-                    <Plus />
-                    Add music
-                  </Button>
-                  <Button variant="outline" onClick={() => folder.current?.click()}>
-                    <FolderPlus />
-                    Import folder
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <Button onClick={() => files.current?.click()}>
+                      <Plus />
+                      Add music
+                    </Button>
+                    <Button variant="outline" onClick={() => folder.current?.click()}>
+                      <FolderPlus />
+                      Import folder
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 font-semibold"
+                      onClick={async () => {
+                        setMessage("Loading starter ambient & indie music...");
+                        const count = await p.loadSampleMusic();
+                        setMessage(`${count} high-fidelity songs ready to play!`);
+                      }}
+                    >
+                      <Music className="mr-1.5 h-4 w-4 text-emerald-500" />
+                      Load Sample Music
+                    </Button>
+                  </div>
                 </div>
               )}
             </>
@@ -1679,7 +1720,8 @@ function MusicApp() {
                   <div
                     key={vid.id}
                     className="explore-compact-row cursor-pointer"
-                    onClick={() => openDownloadModal(vid, "audio")}
+                    onClick={() => playOnlineTrack(vid)}
+                    title="Click to play in SPOILED player"
                   >
                     <div className="explore-thumb-wrap">
                       <img src={vid.thumbnail} alt={vid.title} loading="lazy" />
@@ -1700,6 +1742,18 @@ function MusicApp() {
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                        title="Play in SPOILED player"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playOnlineTrack(vid);
+                        }}
+                      >
+                        <Play className="h-4 w-4 fill-current ml-0.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-muted-foreground hover:text-emerald-500"
                         title="Choose quality & download"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1712,13 +1766,13 @@ function MusicApp() {
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                        title="Watch video"
+                        title="Watch video on YouTube"
                         onClick={(e) => {
                           e.stopPropagation();
                           watchVideo(vid);
                         }}
                       >
-                        <Play className="h-4 w-4 fill-current ml-0.5" />
+                        <Film className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -2181,14 +2235,14 @@ function MusicApp() {
                         <div
                           key={vid.id}
                           className="video-card cursor-pointer"
-                          onClick={() => openDownloadModal(vid, "audio")}
-                          title="Click to choose qualities & download song"
+                          onClick={() => playOnlineTrack(vid)}
+                          title="Click to play in SPOILED player"
                         >
                           <div className="video-thumb-wrap">
                             <img src={vid.thumbnail} alt={vid.title} />
                             <div className="video-play-overlay">
-                              <div className="video-play-circle" title="Choose download quality">
-                                <Download className="h-6 w-6 text-white" />
+                              <div className="video-play-circle" title="Play track">
+                                <Play className="h-6 w-6 text-white fill-current ml-0.5" />
                               </div>
                             </div>
                             {vid.duration && (
@@ -2208,31 +2262,35 @@ function MusicApp() {
                                 className="h-8 text-xs font-semibold text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  playOnlineTrack(vid);
+                                }}
+                                title="Play in SPOILED player"
+                              >
+                                <Play className="h-3.5 w-3.5 mr-1 fill-current" /> Play
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-muted-foreground hover:text-emerald-500"
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   openDownloadModal(vid, "audio");
                                 }}
-                                title="Download with quality options"
+                                title="Download audio to library"
                               >
-                                <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" /> Download
+                                <Download className="h-3.5 w-3.5 mr-1" /> Download
                               </Button>
-                              <button
-                                className="watch-btn"
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-muted-foreground hover:text-foreground"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   watchVideo(vid);
                                 }}
+                                title="Watch YouTube video"
                               >
-                                <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
-                              </button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  watchVideo(vid, true);
-                                }}
-                                title="Picture-in-Picture Mini Player"
-                              >
-                                <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
+                                <Film className="h-3.5 w-3.5 mr-1" /> Watch
                               </Button>
                             </div>
                           </div>
@@ -2615,7 +2673,16 @@ function MusicApp() {
                           t.title.toLowerCase().trim() === item.title.toLowerCase().trim(),
                       );
                       return (
-                        <div key={item.id} className="download-full-card">
+                        <div
+                          key={item.id}
+                          className="download-full-card cursor-pointer"
+                          onClick={() => {
+                            if (libraryTrack) {
+                              p.playTrack(libraryTrack.id);
+                              setMessage(`Playing "${libraryTrack.title}"`);
+                            }
+                          }}
+                        >
                           <div className="download-full-thumb">
                             <img src={libraryTrack?.pictureUrl || item.thumbnail} alt="" />
                           </div>
@@ -4122,18 +4189,38 @@ function MusicApp() {
   );
 }
 
-function Empty({ label, onAdd }: { label: string; onAdd: () => void }) {
+function Empty({
+  label,
+  onAdd,
+  onLoadSamples,
+}: {
+  label: string;
+  onAdd: () => void;
+  onLoadSamples?: () => void;
+}) {
   return (
     <div className="empty-state">
       <div className="empty-icon-wrapper">
         <img src={spoiledLiquidLogo} alt="SPOILED" className="empty-liquid-icon" />
       </div>
       <h3>{label}</h3>
-      <p>Choose audio files from your device to get started.</p>
-      <Button onClick={onAdd}>
-        <Plus />
-        Add music
-      </Button>
+      <p>Choose audio files from your device or load sample tracks to get started.</p>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <Button onClick={onAdd}>
+          <Plus />
+          Add music
+        </Button>
+        {onLoadSamples && (
+          <Button
+            variant="outline"
+            className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10 font-semibold"
+            onClick={onLoadSamples}
+          >
+            <Music className="mr-1.5 h-4 w-4" />
+            Load Sample Music
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

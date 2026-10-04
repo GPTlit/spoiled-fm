@@ -4868,3 +4868,10 @@ body,
   gap: 6px;
   flex: none;
 }
+
+/* Row menus must float above neighbouring rows */
+.track-row { overflow: visible !important; }
+.track-row:has(.row-menu) { z-index: 50; }
+.track-main, .track-copy { overflow: hidden; }
+/* In-app notch island is hidden; background playback uses system Media Session controls */
+.android-notch-island { display: none !important; }

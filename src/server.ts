@@ -613,19 +613,16 @@ export default {
 
       const templateOutput = path.resolve("/tmp", `${basePrefix}.%(ext)s`);
 
-      if (type === "audio") {
-        // Select the best audio-only stream when YouTube exposes one, then fall
-        // back to the best combined stream. This keeps the exact requested video
-        // instead of failing on videos that do not expose AAC/m4a.
-        ext = "m4a";
-        args = [
-          ...commonArgs,
-          "-f",
-          "bestaudio/best",
-          "-o",
-          templateOutput,
-          videoUrl,
-        ];
+  if (type === "audio") {
+    ext = "m4a";
+    args = [
+      ...commonArgs,
+      "-f",
+      "bestaudio/best",
+      "-o",
+    templateOutput,
+    videoUrl,
+  ];
       } else {
         ext = "mp4";
         const height = ["1080", "720", "480", "360"].includes(quality) ? quality : "720";
@@ -641,11 +638,10 @@ export default {
         ];
       }
 
-      if (type === "audio") {
-        const fallbackPath = path.resolve("/tmp", `${basePrefix}_audio.mp3`);
-        const bitrate = quality === "192" ? "192K" : quality === "256" ? "256K" : "320K";
-
-        // Try yt-dlp silently with short timeout
+  if (type === "audio") {
+    const fallbackPath = path.resolve("/tmp", `${basePrefix}_audio.mp3`);
+    
+    // Try yt-dlp silently with short timeout
         try {
           await execFileAsync(binaryPath, args, { timeout: 120000 });
           const tmpFiles = await fs.promises.readdir("/tmp").catch(() => [] as string[]);

@@ -46,7 +46,6 @@ import {
   Check,
   Loader2,
   AlertCircle,
-  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -171,7 +170,6 @@ function MusicApp() {
   const [accountBusy, setAccountBusy] = useState(false);
   const [screen, setScreen] = useState<Screen>("home");
   const [tab, setTab] = useState<Tab>("Songs");
-  const [exploreTab, setExploreTab] = useState<"overview" | "youtube" | "ai">("overview");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("Recently Added");
   const [selectedAlbum, setSelectedAlbum] = useState("");
@@ -183,7 +181,6 @@ function MusicApp() {
   const [menu, setMenu] = useState<string | null>(null);
   const [theme, setTheme] = useState("Liquid Glass (Light)");
   const [message, setMessage] = useState("");
-  const [lyricsTab, setLyricsTab] = useState<"lyrics" | "ai">("lyrics");
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
@@ -240,13 +237,26 @@ function MusicApp() {
   const [selectedQuality, setSelectedQuality] = useState<string>("720");
   const [downloadInProgress, setDownloadInProgress] = useState(false);
   const [downloadProgressText, setDownloadProgressText] = useState("");
-  const [botFallbackInfo, setBotFallbackInfo] = useState<{
-    downloader10: string;
-    y2mate: string;
-    ssyoutube: string;
-  } | null>(null);
+  const [downloads, setDownloads] = useState<{ id: string; title: string; status: string }[]>([]);
+  const [editInfo, setEditInfo] = useState(false);
+  const [infoDraft, setInfoDraft] = useState({ title: "", artist: "", album: "" });
 
   const [savedReady, setSavedReady] = useState(false);
+  const pendingArtwork = useRef<{ previousIds: Set<string>; thumbnail: string } | null>(null);
+  useEffect(() => {
+    const pending = pendingArtwork.current;
+    if (!pending) return;
+    const track = p.library.find((item) => !pending.previousIds.has(item.id));
+    if (!track) return;
+    pendingArtwork.current = null;
+    void fetch(pending.thumbnail)
+      .then((response) => {
+        if (!response.ok) throw new Error("Artwork unavailable");
+        return response.blob();
+      })
+      .then((blob) => p.setTrackArtwork(track.id, blob))
+      .catch(() => {});
+  }, [p.library]);
 
   // Synchronized Lyrics
   const currentLyricText = p.current ? lyrics[p.current.id] || "" : "";
@@ -258,7 +268,17 @@ function MusicApp() {
     if (activeLrcIndex >= 0 && lrcContainerRef.current) {
       const activeEl = lrcContainerRef.current.children[activeLrcIndex] as HTMLElement;
       if (activeEl) {
-        activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        const container = lrcContainerRef.current;
+        container.scrollTo({
+          top:
+            activeEl.offsetTop -
+            container.offsetTop -
+            container.clientHeight / 2 +
+            activeEl.clientHeight / 2,
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "instant"
+            : "smooth",
+        });
       }
     }
   }, [activeLrcIndex]);
@@ -409,7 +429,10 @@ function MusicApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [p]);
 
+  const playerOrigin = useRef<Screen>("home");
   const go = (next: Screen) => {
+    if (["now", "lyrics", "queue"].includes(next) && !["now", "lyrics", "queue"].includes(screen))
+      playerOrigin.current = screen;
     setPrevious(screen);
     setScreen(next);
     setMenu(null);
@@ -485,6 +508,10 @@ function MusicApp() {
     }
   }, []);
 
+  useEffect(() => {
+    void searchOnlineVideos("music");
+  }, [searchOnlineVideos]);
+
   const watchVideo = (video: OnlineVideo, pip = false) => {
     if (p.playing) p.toggle(); // Gracefully pause local audio when watching video
     setActiveWatchVideo(video);
@@ -536,14 +563,17 @@ function MusicApp() {
     setSelectedQuality(defaultType === "audio" ? "320" : "720");
     setDownloadProgressText("");
     setDownloadInProgress(false);
-    setBotFallbackInfo(null);
     setDownloadModalOpen(true);
   };
 
   const handleDownloadFile = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
-    setBotFallbackInfo(null);
+    setDownloads((items) => [
+      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" },
+      ...items.filter((item) => item.id !== downloadModalVideo.id),
+    ]);
+    setDownloadModalOpen(false);
     setDownloadProgressText(
       downloadType === "audio"
         ? `Preparing & encoding ${selectedQuality}kbps audio...`
@@ -555,29 +585,12 @@ function MusicApp() {
       const res = await fetch(url);
 
       if (!res.ok) {
-        // When server-side download is restricted by YouTube's cloud verification,
-        // automatically trigger the instant high-speed browser downloader without failing!
-        const fallbackUrls = {
-          downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
-          y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
-          ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
-        };
-        setBotFallbackInfo(fallbackUrls);
-
-        const targetDirectUrl =
-          downloadType === "audio" ? fallbackUrls.y2mate : fallbackUrls.downloader10;
-
-        const link = document.createElement("a");
-        link.href = targetDirectUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setMessage(
-          `Direct ${downloadType === "video" ? `${selectedQuality}p video` : `${selectedQuality}kbps audio`} download opened in new tab!`,
+        setDownloads((items) =>
+          items.map((item) =>
+            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
+          ),
         );
+        setMessage("Download unavailable. You can add audio files you own to your library.");
         return;
       }
 
@@ -596,31 +609,21 @@ function MusicApp() {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Saved to device" } : item,
+        ),
+      );
       setMessage(`Downloaded "${filename}" successfully!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
-      console.error("Server download attempt error, launching direct download:", err);
-      // Auto fallback to direct browser download on any network/server exception
-      const directUrl =
-        downloadType === "audio"
-          ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
-          : `https://10downloader.com/download?v=${downloadModalVideo.id}`;
-
-      setBotFallbackInfo({
-        downloader10: `https://10downloader.com/download?v=${downloadModalVideo.id}`,
-        y2mate: `https://www.y2mate.com/youtube/${downloadModalVideo.id}`,
-        ssyoutube: `https://ssyoutube.com/watch?v=${downloadModalVideo.id}`,
-      });
-
-      const link = document.createElement("a");
-      link.href = directUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setMessage(`Direct high-speed download initiated for "${downloadModalVideo.title}"!`);
+      console.error("Download error:", err);
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
+        ),
+      );
+      setMessage("Download failed. Please try again later.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -630,47 +633,47 @@ function MusicApp() {
   const handleSaveToLocalLibrary = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
-    setDownloadProgressText("Extracting audio & importing into SPOILED local library...");
+    setDownloads((items) => [
+      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Adding to library" },
+      ...items.filter((item) => item.id !== downloadModalVideo.id),
+    ]);
+    setDownloadModalOpen(false);
+    setDownloadProgressText("Importing audio into your library...");
 
     try {
       const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
       const res = await fetch(url);
       if (!res.ok) {
-        // Fallback: trigger direct audio download and advise user to add to library
-        const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
-        const link = document.createElement("a");
-        link.href = directAudioUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setMessage(
-          `Direct MP3 download opened! Drag the downloaded audio into SPOILED to save permanently in your library.`,
+        setDownloads((items) =>
+          items.map((item) =>
+            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
+          ),
         );
+        setMessage("Audio isn't available for import. Add an audio file you own instead.");
         return;
       }
 
       const blob = await res.blob();
       const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
+      const before = new Set(p.library.map((track) => track.id));
       await p.addFiles([file]);
+      // The imported track is committed on the next render.
+      pendingArtwork.current = { previousIds: before, thumbnail: downloadModalVideo.thumbnail };
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item,
+        ),
+      );
       setMessage(`"${downloadModalVideo.title}" added to your local library!`);
       setDownloadModalOpen(false);
     } catch (err: unknown) {
-      console.error("Save to library server stream error:", err);
-      const directAudioUrl = `https://www.y2mate.com/youtube/${downloadModalVideo.id}`;
-      const link = document.createElement("a");
-      link.href = directAudioUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      setMessage(
-        `Direct MP3 download opened! Once saved, click 'Add music' in Library to keep it permanently.`,
+      console.error("Save to library error:", err);
+      setDownloads((items) =>
+        items.map((item) =>
+          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
+        ),
       );
+      setMessage("Audio couldn't be imported. Add an audio file you own instead.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -926,7 +929,9 @@ function MusicApp() {
   const isDark = theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
 
   return (
-    <div className={`app-shell ${isDark ? "dark" : ""}`}>
+    <div
+      className={`app-shell ${isDark ? "dark" : ""} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
+    >
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
         <div className="orb orb-2" />
@@ -988,14 +993,6 @@ function MusicApp() {
                 {label}
               </Button>
             ))}
-            <Button
-              variant="ghost"
-              className={activeNav === "ai" ? "selected" : ""}
-              onClick={() => go("ai")}
-            >
-              <Sparkles />
-              AI Curator
-            </Button>
             <Button
               variant="ghost"
               className={activeNav === "search" ? "selected" : ""}
@@ -1307,103 +1304,56 @@ function MusicApp() {
                 <Compass className="h-6 w-6 text-muted-foreground" />
               </header>
 
-              <div className="segmented">
+              <div className="video-search-bar">
+                <div className="video-search-input-wrap">
+                  <input
+                    aria-label="Search videos"
+                    placeholder="Search songs, artists or videos…"
+                    value={youtubeQuery}
+                    onChange={(e) => setYoutubeQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void searchOnlineVideos(youtubeQuery);
+                    }}
+                  />
+                </div>
                 <Button
-                  variant="ghost"
-                  className={exploreTab === "overview" ? "active" : ""}
-                  onClick={() => setExploreTab("overview")}
+                  className="video-search-btn"
+                  onClick={() => void searchOnlineVideos(youtubeQuery)}
+                  disabled={onlineLoading}
                 >
-                  Featured
-                </Button>
-                <Button
-                  variant="ghost"
-                  className={exploreTab === "youtube" ? "active" : ""}
-                  onClick={() => setExploreTab("youtube")}
-                >
-                  <Youtube className="mr-1 h-4 w-4 text-red-500 inline" /> YouTube
-                </Button>
-                <Button
-                  variant="ghost"
-                  className={exploreTab === "ai" ? "active" : ""}
-                  onClick={() => setExploreTab("ai")}
-                >
-                  <Sparkles className="mr-1 h-4 w-4 inline" /> AI Curator
+                  <Search className="h-4 w-4" /> Search
                 </Button>
               </div>
-
-              {exploreTab === "overview" && (
-                <>
-                  <div
-                    className="feature explore-feature"
-                    style={{
-                      backgroundImage: `linear-gradient(0deg, var(--feature-shade), transparent 70%), url(${auroraBanner})`,
-                    }}
-                  >
-                    <div>
-                      <h2>Find your next favorite.</h2>
-                      <p>Start with the music you already love.</p>
-                    </div>
-                  </div>
-                  <div className="section-title">
-                    <h2>Your albums</h2>
-                  </div>
-                  {albums.length ? (
-                    albumGrid(albums)
-                  ) : (
-                    <p className="muted-note">Add your music to explore your own collection.</p>
-                  )}
-                </>
+              <div className="section-title">
+                <h2>Videos</h2>
+              </div>
+              {onlineLoading && <p className="muted-note">Loading videos…</p>}
+              {!onlineLoading && onlineVideos.length === 0 && (
+                <p className="muted-note">
+                  No videos available right now. Search for something else.
+                </p>
               )}
-
-              {exploreTab === "youtube" && (
-                <div>
-                  <div className="video-search-bar">
-                    <div className="video-search-input-wrap">
-                      <input
-                        placeholder="Search songs, artists, live concerts, or videos…"
-                        value={youtubeQuery}
-                        onChange={(e) => setYoutubeQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && youtubeQuery.trim()) {
-                            void searchOnlineVideos(youtubeQuery.trim());
-                          }
-                        }}
-                      />
-                      {youtubeQuery && (
-                        <button
-                          type="button"
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            setYoutubeQuery("");
-                            setOnlineVideos([]);
-                          }}
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
+              {downloads.length > 0 && (
+                <div className="download-activity">
+                  <h2>Downloads</h2>
+                  {downloads.map((item) => (
+                    <div key={item.id}>
+                      <span title={item.title}>{item.title}</span>
+                      <small>{item.status}</small>
                     </div>
-                    <Button
-                      className="video-search-btn"
-                      onClick={() =>
-                        youtubeQuery.trim() && void searchOnlineVideos(youtubeQuery.trim())
-                      }
-                      disabled={onlineLoading}
-                    >
-                      <Search className="h-4 w-4" /> Search
-                    </Button>
-                  </div>
-
+                  ))}
+                </div>
+              )}
+              {
+                <div>
                   {/* Online Video Grid if searched */}
                   {onlineVideos.length > 0 && (
                     <div>
                       <div className="section-title">
-                        <h2 className="flex items-center gap-2">
-                          <Youtube className="text-red-500 h-5 w-5" /> Video Results (
-                          {onlineVideos.length})
-                        </h2>
+                        <h2 className="flex items-center gap-2">Videos ({onlineVideos.length})</h2>
                         {onlineLoading && (
                           <span className="text-xs text-muted-foreground animate-pulse">
-                            Searching YouTube…
+                            Searching…
                           </span>
                         )}
                       </div>
@@ -1470,18 +1420,7 @@ function MusicApp() {
                     </div>
                   )}
                 </div>
-              )}
-
-              {exploreTab === "ai" && (
-                <div className="assistant-panel">
-                  <p className="assistant-intro">
-                    Ask your personal AI Curator for song ideas, artist history, or recommendations.
-                  </p>
-                  <Button variant="outline" className="mx-auto mb-6" onClick={() => go("ai")}>
-                    <Sparkles className="mr-2 h-4 w-4" /> Open Full AI Curator Workspace
-                  </Button>
-                </div>
-              )}
+              }
             </>
           )}
 
@@ -1534,6 +1473,18 @@ function MusicApp() {
                   </Button>
                 )}
               </div>
+
+              {downloads.length > 0 && (
+                <div className="download-activity">
+                  <h2>Downloads</h2>
+                  {downloads.map((item) => (
+                    <div key={item.id}>
+                      <span title={item.title}>{item.title}</span>
+                      <small>{item.status}</small>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Listening Statistics */}
               <div className="stats-grid">
@@ -2277,6 +2228,18 @@ function MusicApp() {
                   </label>
                 </div>
                 <div className="settings-row">
+                  <SlidersHorizontal />
+                  <span>Transitions</span>
+                  <select
+                    aria-label="Transition mode"
+                    value={p.mixMode}
+                    onChange={(e) => p.setMixMode(e.target.value as "crossfade" | "automix")}
+                  >
+                    <option value="crossfade">Crossfade</option>
+                    <option value="automix">AutoMix</option>
+                  </select>
+                </div>
+                <div className="settings-row">
                   <Volume2 />
                   <span>Volume</span>
                   <input
@@ -2303,27 +2266,6 @@ function MusicApp() {
                     <option>Liquid Obsidian (Dark)</option>
                   </select>
                 </div>
-                <div className="settings-row">
-                  <Sparkles />
-                  <span>AI Curator</span>
-                  <Button variant="ghost" size="sm" onClick={() => go("ai")}>
-                    Open
-                  </Button>
-                </div>
-                <div className="settings-row">
-                  <Youtube />
-                  <span>YouTube Discovery</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setExploreTab("youtube");
-                      go("explore");
-                    }}
-                  >
-                    Search
-                  </Button>
-                </div>
               </div>
               <div className="settings-footer">
                 <div className="liquid-icon-frame">
@@ -2336,14 +2278,19 @@ function MusicApp() {
           )}
 
           {(screen === "now" || screen === "lyrics" || screen === "queue") && (
-            <div className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""}`}>
+            <div
+              className={`player-screen ${screen === "lyrics" ? "lyrics-screen" : ""} ${screen === "queue" ? "queue-screen" : ""}`}
+            >
               <div className="player-top">
                 <Button
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
                   title="Close player"
-                  onClick={back}
+                  onClick={() => {
+                    setScreen(playerOrigin.current);
+                    setMenu(null);
+                  }}
                 >
                   <ChevronDown />
                 </Button>
@@ -2424,15 +2371,6 @@ function MusicApp() {
                 </>
               ) : screen === "lyrics" ? (
                 <>
-                  <div className="segmented player-tabs">
-                    <Button variant="ghost" className="active">
-                      Lyrics
-                    </Button>
-                    <Button variant="ghost" onClick={() => go("ai")}>
-                      AI Curator
-                    </Button>
-                  </div>
-
                   <div className="lyrics-body">
                     {p.current ? (
                       parsedLrc.length > 0 ? (
@@ -2568,8 +2506,19 @@ function MusicApp() {
                     <Button variant="ghost" onClick={() => go("queue")}>
                       <ListMusic className="mr-1 h-4 w-4" /> Queue
                     </Button>
-                    <Button variant="ghost" onClick={() => go("ai")}>
-                      <Sparkles className="mr-1 h-4 w-4" /> AI Curator
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setInfoDraft({
+                          title: p.current?.title ?? "",
+                          artist: p.current?.artist ?? "",
+                          album: p.current?.album ?? "",
+                        });
+                        setEditInfo(true);
+                      }}
+                      disabled={!p.current}
+                    >
+                      <SlidersHorizontal className="mr-1 h-4 w-4" /> Info
                     </Button>
                   </div>
                 </>
@@ -2624,6 +2573,66 @@ function MusicApp() {
             className="mini-progress"
             style={{ width: `${p.duration ? (p.time / p.duration) * 100 : 0}%` }}
           />
+        </div>
+      )}
+
+      {editInfo && p.current && (
+        <div className="download-sheet-backdrop" onClick={() => setEditInfo(false)}>
+          <form
+            className="download-sheet info-sheet"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!p.current) return;
+              void p
+                .updateTrackInfo(p.current.id, {
+                  title: infoDraft.title.trim() || p.current.title,
+                  artist: infoDraft.artist.trim() || p.current.artist,
+                  album: infoDraft.album.trim() || p.current.album,
+                })
+                .then(() => {
+                  setEditInfo(false);
+                  setMessage("Song info saved");
+                });
+            }}
+          >
+            <div className="download-sheet-header">
+              <h3>Song info</h3>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setEditInfo(false)}
+                title="Close"
+              >
+                <X />
+              </Button>
+            </div>
+            <div className="info-fields">
+              <label>
+                Title
+                <input
+                  value={infoDraft.title}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, title: e.target.value })}
+                />
+              </label>
+              <label>
+                Artist
+                <input
+                  value={infoDraft.artist}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, artist: e.target.value })}
+                />
+              </label>
+              <label>
+                Album
+                <input
+                  value={infoDraft.album}
+                  onChange={(e) => setInfoDraft({ ...infoDraft, album: e.target.value })}
+                />
+              </label>
+              <Button type="submit">Save</Button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -2797,48 +2806,6 @@ function MusicApp() {
               )}
 
               {/* Direct Fast Downloader Active Info */}
-              {botFallbackInfo && (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-3">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                    <Check className="h-4 w-4 shrink-0 text-emerald-500" />
-                    <span>Direct Fast Download Ready</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Your high-speed download was launched in a new tab! If your browser prevented
-                    the tab from opening, click any format below:
-                  </p>
-                  <div className="flex flex-col gap-2 pt-1">
-                    <a
-                      href={botFallbackInfo.downloader10}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5"
-                    >
-                      <Download className="h-4 w-4" /> Download MP4 Video (All Qualities){" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <a
-                      href={botFallbackInfo.y2mate}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-red-600 to-rose-700"
-                    >
-                      <Music className="h-4 w-4" /> Download MP3 Audio (320kbps){" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <a
-                      href={botFallbackInfo.ssyoutube}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="download-cta-btn w-full justify-center text-xs h-10 no-underline gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-700"
-                    >
-                      <Film className="h-4 w-4" /> Download via SSYouTube{" "}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                </div>
-              )}
-
               {/* Download Buttons */}
               <div className="flex flex-col gap-2.5 pt-2">
                 <Button
@@ -2859,24 +2826,6 @@ function MusicApp() {
                     </>
                   )}
                 </Button>
-
-                {/* Instant 1-Click External Direct Download Button */}
-                <a
-                  href={
-                    downloadType === "audio"
-                      ? `https://www.y2mate.com/youtube/${downloadModalVideo.id}`
-                      : `https://10downloader.com/download?v=${downloadModalVideo.id}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full h-10 px-4 rounded-xl border border-white/40 dark:border-white/20 bg-white/30 dark:bg-white/10 hover:bg-white/50 dark:hover:bg-white/20 flex items-center justify-center gap-2 text-xs font-semibold text-foreground no-underline transition-all shadow-sm"
-                >
-                  <ExternalLink className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>
-                    ⚡ Instant Browser Download (
-                    {downloadType === "video" ? "MP4 Video" : "MP3 Audio"})
-                  </span>
-                </a>
 
                 {downloadType === "audio" && (
                   <Button

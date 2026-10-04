@@ -1,4 +1,4 @@
-import * as mm from "music-metadata-browser";
+import { parseBlob } from "music-metadata";
 
 export interface ParsedAudioMetadata {
   title: string;
@@ -43,7 +43,7 @@ export async function extractAudioMetadata(file: File): Promise<ParsedAudioMetad
     .slice(-2, -1)[0];
 
   try {
-    const meta = await mm.parseBlob(file, { duration: true, skipCovers: false });
+    const meta = await parseBlob(file, { duration: true, skipCovers: false });
     const common = meta.common;
     const format = meta.format;
 
@@ -54,7 +54,7 @@ export async function extractAudioMetadata(file: File): Promise<ParsedAudioMetad
       const pic = common.picture[0]!;
       const mime = pic.format || "image/jpeg";
       // Ensure we create a clean Blob from the picture buffer
-      pictureBlob = new Blob([pic.data], { type: mime });
+      pictureBlob = new Blob([pic.data as BlobPart], { type: mime });
       pictureUrl = URL.createObjectURL(pictureBlob);
     }
 

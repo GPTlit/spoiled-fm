@@ -3406,3 +3406,287 @@
   gap: 4px;
   flex-shrink: 0;
 }
+
+/* Keep long user-supplied metadata within the viewport without changing browser zoom. */
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+.app-shell,
+.app-layout,
+.main-screen,
+.track-list,
+.track-row,
+.track-main,
+.track-copy,
+.track-copy strong,
+.track-copy small {
+  max-width: 100%;
+  min-width: 0;
+}
+.track-row {
+  overflow: hidden;
+}
+.track-main {
+  overflow: hidden;
+}
+.track-copy {
+  flex: 1;
+  overflow: hidden;
+}
+.track-copy strong,
+.track-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-duration {
+  flex: none;
+}
+.app-layout {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+.main-screen {
+  overflow: hidden;
+}
+.explore-secondary-search {
+  display: none;
+}
+.video-search-bar,
+.video-search-input-wrap {
+  max-width: 100%;
+  min-width: 0;
+}
+.video-search-input-wrap input {
+  width: 100%;
+  min-width: 0;
+}
+.download-activity {
+  margin: 18px 0;
+  padding: 14px 0;
+  border-block: 1px solid var(--border);
+}
+.download-activity h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.download-activity > div {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.download-activity span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.download-activity small {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.info-fields {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+.info-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.info-fields input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 10px;
+  border-radius: 6px;
+}
+/* Listening is a focused full-height view. Lyrics and queue scroll only inside their own panes. */
+.immersive-player {
+  height: 100dvh;
+  min-height: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.immersive-player .desktop-sidebar,
+.immersive-player .bottom-nav,
+.immersive-player .mini-player {
+  display: none;
+}
+.immersive-player .app-layout {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  padding: 0 24px;
+}
+.immersive-player .main-screen {
+  height: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+.immersive-player .player-screen {
+  height: 100%;
+  min-height: 0;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px 0;
+}
+.immersive-player .player-top {
+  flex: none;
+}
+.immersive-player .large-cover {
+  width: min(38vh, 390px, 85%);
+  max-height: 38vh;
+  margin: auto auto 12px;
+  flex: none;
+}
+.immersive-player .song-heading,
+.immersive-player .seek-block,
+.immersive-player .player-controls,
+.immersive-player .player-bottom {
+  flex: none;
+}
+.immersive-player .seek-block {
+  margin: 12px 0 4px;
+}
+.immersive-player .player-controls {
+  margin: 4px 0 6px;
+}
+.immersive-player .player-bottom {
+  margin-top: 4px;
+}
+.immersive-player .lyrics-screen,
+.immersive-player .queue-screen {
+  padding: 12px;
+}
+.immersive-player .lyrics-body {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.immersive-player .lrc-container {
+  height: 100%;
+  max-height: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.immersive-player .lrc-container::-webkit-scrollbar {
+  display: none;
+}
+.immersive-player .queue-screen .track-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+@media (max-width: 768px) {
+  .app-layout {
+    max-width: 100%;
+    padding-inline: 16px;
+  }
+  .immersive-player .app-layout {
+    padding: 0 14px;
+  }
+  .immersive-player .large-cover {
+    width: min(35vh, 82vw);
+    max-height: 35vh;
+  }
+  .immersive-player .lyrics-screen {
+    border-radius: 0;
+  }
+  .player-bottom button {
+    padding-inline: 10px;
+  }
+  .download-activity > div {
+    flex-wrap: wrap;
+  }
+}
+@media (max-height: 700px) {
+  .immersive-player .large-cover {
+    width: min(28vh, 250px);
+    max-height: 28vh;
+  }
+  .immersive-player .player-controls .big-play {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+.fixed-page {
+  height: 100dvh;
+  min-height: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.fixed-page .app-layout {
+  height: 100%;
+}
+.fixed-page .main-screen {
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-bottom: 125px;
+}
+.immersive-player .main-screen {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.immersive-player .song-heading {
+  min-width: 0;
+}
+.immersive-player .song-heading > div {
+  min-width: 0;
+  overflow: hidden;
+}
+.immersive-player .song-heading h1,
+.immersive-player .song-heading p {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 768px) {
+  .fixed-page .main-screen {
+    padding-bottom: 165px;
+  }
+  .immersive-player .main-screen {
+    padding-bottom: 0;
+  }
+}
+
+.immersive-player .queue-screen .queue-intro {
+  flex: none;
+}
+.immersive-player .queue-screen .queue-row {
+  min-width: 0;
+}
+.immersive-player .queue-screen .queue-row span {
+  min-width: 0;
+  overflow: hidden;
+}
+.immersive-player .queue-screen .queue-row strong,
+.immersive-player .queue-screen .queue-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.immersive-player .lyrics-screen .lyrics-body > p,
+.immersive-player .lyrics-screen .lyrics-body > div:not(.lrc-container) {
+  max-height: 100%;
+  overflow-y: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .immersive-player .lrc-container {
+    scroll-behavior: auto;
+  }
+}

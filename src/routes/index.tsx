@@ -20,6 +20,9 @@ import {
   Play,
   Plus,
   Repeat2,
+  Repeat1,
+  ImagePlus,
+  Menu,
   Search,
   Send,
   Settings2,
@@ -62,7 +65,6 @@ import {
   type EqPreset,
 } from "@/lib/player";
 import spoiledLiquidLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
-import auroraBanner from "@/assets/images/aurora_glass_banner_1790935692854.jpg";
 import featured from "@/assets/better-days.jpg";
 import afterHours from "@/assets/after-hours.jpg";
 import dawn from "@/assets/dawn-fm.jpg";
@@ -375,10 +377,102 @@ function MusicApp() {
       </Button>
     </div>
   ) : (
-    <Button variant="outline" onClick={signIn} disabled={accountBusy}>
-      Sign in with Google
-    </Button>
+    <div className="account-controls">
+      <Button variant="outline" onClick={signIn} disabled={accountBusy}>
+        Sign in with Google
+      </Button>
+      <Button variant="ghost" onClick={() => setAuthOpen(true)} disabled={accountBusy}>
+        Use email
+      </Button>
+    </div>
   );
+
+  // Play counts, play mode, look and player style are kept on this device.
+  useEffect(() => {
+    try {
+      setPlays(JSON.parse(localStorage.getItem("spoiled-plays") || "{}"));
+      const mode = localStorage.getItem("spoiled-play-mode");
+      if (mode === "loop-all" || mode === "loop-one" || mode === "shuffle") setPlayMode(mode);
+      const t = localStorage.getItem("spoiled-theme");
+      if (t) setTheme(t);
+      const ps = localStorage.getItem("spoiled-player-style");
+      if (ps) setPlayerStyle(ps);
+      setRecentAccounts(JSON.parse(localStorage.getItem("spoiled-accounts") || "[]"));
+    } catch {
+      // ignore corrupt prefs
+    }
+  }, []);
+  useEffect(() => {
+    const id = p.current?.id;
+    if (!id) return;
+    setPlays((prev) => {
+      const next = { ...prev, [id]: (prev[id] ?? 0) + 1 };
+      localStorage.setItem("spoiled-plays", JSON.stringify(next));
+      return next;
+    });
+  }, [p.current?.id]);
+  useEffect(() => {
+    p.setShuffle(playMode === "shuffle");
+    p.setRepeat(playMode !== "shuffle");
+    p.setRepeatOne(playMode === "loop-one");
+    localStorage.setItem("spoiled-play-mode", playMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playMode]);
+  useEffect(() => {
+    const email = account?.email;
+    if (email) {
+      setRecentAccounts((prev) => {
+        const next = [email, ...prev.filter((e) => e !== email)].slice(0, 5);
+        localStorage.setItem("spoiled-accounts", JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [account?.email]);
+
+  const emailAuth = async () => {
+    if (!authEmail.trim() || authPassword.length < 6) {
+      setMessage("Enter your email and a password of at least 6 characters.");
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        setMessage(
+          data.session ? "Account created." : "Check your inbox to confirm your email, then sign in.",
+        );
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) throw error;
+        setMessage("Signed in.");
+      }
+      setAuthOpen(false);
+      setAuthPassword("");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Sign-in failed.");
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const switchAccount = async (email?: string) => {
+    await supabase.auth.signOut();
+    setAccount(null);
+    setAuthEmail(email ?? "");
+    setAuthMode("signin");
+    setAuthOpen(true);
+  };
+
+  const cyclePlayMode = () =>
+    setPlayMode((m) => (m === "loop-all" ? "loop-one" : m === "loop-one" ? "shuffle" : "loop-all"));
 
   // Local storage persistence for playlists & lyrics
   useEffect(() => {
@@ -971,11 +1065,13 @@ function MusicApp() {
     ? previous
     : screen;
 
-  const isDark = theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
+  const isVelvet = theme.startsWith("Velvet");
+  const isDark =
+    isVelvet || theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
 
   return (
     <div
-      className={`app-shell ${isDark ? "dark" : ""} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
+      className={`app-shell ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
     >
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
@@ -983,6 +1079,61 @@ function MusicApp() {
         <div className="orb orb-3" />
       </div>
 
+      <input
+        ref={customArtInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (f && p.current) {
+            await p.setTrackArtwork(p.current.id, f);
+            setMessage("Song picture updated.");
+          }
+          e.target.value = "";
+        }}
+      />
+      {authOpen && (
+        <div className="auth-sheet-backdrop" onClick={() => setAuthOpen(false)}>
+          <form
+            className="auth-sheet"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void emailAuth();
+            }}
+          >
+            <h2>{authMode === "signin" ? "Sign in" : "Create account"}</h2>
+            <input
+              type="email"
+              placeholder="Email"
+              autoComplete="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+            />
+            <Button type="submit" disabled={accountBusy}>
+              {authMode === "signin" ? "Sign in" : "Create account"}
+            </Button>
+            <Button type="button" variant="outline" onClick={signIn} disabled={accountBusy}>
+              Continue with Google
+            </Button>
+            <button
+              type="button"
+              className="auth-switch"
+              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+            >
+              {authMode === "signin" ? "New here? Create an account" : "Have an account? Sign in"}
+            </button>
+          </form>
+        </div>
+      )}
       <input
         ref={files}
         type="file"
@@ -1080,10 +1231,10 @@ function MusicApp() {
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
-                  title="Settings"
+                  title="Menu"
                   onClick={() => go("settings")}
                 >
-                  <Settings2 />
+                  <Menu />
                 </Button>
               </div>
 
@@ -1460,10 +1611,10 @@ function MusicApp() {
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
-                  title="Settings"
+                  title="Menu"
                   onClick={() => go("settings")}
                 >
-                  <Settings2 />
+                  <Menu />
                 </Button>
               </header>
 
@@ -1488,13 +1639,35 @@ function MusicApp() {
                   </span>
                 </div>
                 {account ? (
-                  <Button variant="outline" onClick={signOut} disabled={accountBusy}>
-                    Sign out
-                  </Button>
+                  <div className="account-controls">
+                    <Button variant="outline" onClick={() => switchAccount()} disabled={accountBusy}>
+                      Switch account
+                    </Button>
+                    <Button variant="outline" onClick={signOut} disabled={accountBusy}>
+                      Sign out
+                    </Button>
+                  </div>
                 ) : (
-                  <Button onClick={signIn} disabled={accountBusy}>
-                    Sign in with Google
-                  </Button>
+                  <div className="account-controls">
+                    <Button onClick={signIn} disabled={accountBusy}>
+                      Sign in with Google
+                    </Button>
+                    <Button variant="outline" onClick={() => setAuthOpen(true)} disabled={accountBusy}>
+                      Email & password
+                    </Button>
+                  </div>
+                )}
+                {recentAccounts.filter((e) => e !== account?.email).length > 0 && (
+                  <div className="recent-accounts">
+                    <small>Switch to</small>
+                    {recentAccounts
+                      .filter((e) => e !== account?.email)
+                      .map((e) => (
+                        <button key={e} onClick={() => switchAccount(e)}>
+                          {e}
+                        </button>
+                      ))}
+                  </div>
                 )}
               </div>
 
@@ -2284,11 +2457,45 @@ function MusicApp() {
                   <select
                     aria-label="Appearance"
                     value={theme}
-                    onChange={(e) => setTheme(e.target.value)}
+                    onChange={(e) => {
+                      setTheme(e.target.value);
+                      localStorage.setItem("spoiled-theme", e.target.value);
+                    }}
                   >
                     <option>Liquid Glass (Light)</option>
                     <option>Liquid Obsidian (Dark)</option>
+                    <option>Velvet Night (Deep)</option>
                   </select>
+                </div>
+                <div className="settings-row">
+                  <Disc3 />
+                  <span>Player style</span>
+                  <select
+                    aria-label="Player style"
+                    value={playerStyle}
+                    onChange={(e) => {
+                      setPlayerStyle(e.target.value);
+                      localStorage.setItem("spoiled-player-style", e.target.value);
+                    }}
+                  >
+                    <option>Default</option>
+                    <option>Modern Vinyl</option>
+                    <option>Classic Vinyl</option>
+                    <option>CD</option>
+                    <option>Cassette</option>
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <ImagePlus />
+                  <span>Picture for current song</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!p.current}
+                    onClick={() => customArtInput.current?.click()}
+                  >
+                    Choose from gallery
+                  </Button>
                 </div>
               </div>
               <div className="settings-footer">
@@ -2492,11 +2699,23 @@ function MusicApp() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Shuffle"
-                      onClick={() => p.setShuffle(!p.shuffle)}
-                      className={p.shuffle ? "control-active" : ""}
+                      title={
+                        playMode === "loop-all"
+                          ? "Loop playlist"
+                          : playMode === "loop-one"
+                            ? "Loop one song"
+                            : "Shuffle"
+                      }
+                      onClick={cyclePlayMode}
+                      className="control-active"
                     >
-                      <Shuffle />
+                      {playMode === "loop-all" ? (
+                        <Repeat2 />
+                      ) : playMode === "loop-one" ? (
+                        <Repeat1 />
+                      ) : (
+                        <Shuffle />
+                      )}
                     </Button>
                     <Button variant="ghost" size="icon" title="Previous" onClick={p.prev}>
                       <SkipBack />
@@ -2515,11 +2734,10 @@ function MusicApp() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Repeat"
-                      onClick={() => p.setRepeat(!p.repeat)}
-                      className={p.repeat ? "control-active" : ""}
+                      title="Song picture"
+                      onClick={() => customArtInput.current?.click()}
                     >
-                      <Repeat2 />
+                      <ImagePlus />
                     </Button>
                   </div>
 

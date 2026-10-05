@@ -217,9 +217,10 @@ export const GLOBAL_COUNTRIES: CountryNode[] = [
 interface RadioGlobeProps {
   onTuneInStation?: (station: RadioStation) => void;
   activeStationId?: string | null;
+  onClose?: () => void;
 }
 
-export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
+export function RadioGlobe({ onTuneInStation, onClose }: RadioGlobeProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -240,8 +241,10 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(2.6); // 1.4 to 3.8
-  const [statusText, setStatusText] = useState("Tap any country to tune into live local radio");
+  const [zoomLevel, setZoomLevel] = useState(2.6); // 1.3 to 4.0
+  const [statusText, setStatusText] = useState(
+    "Tap any country or drag the Earth to tune into live radio",
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [moreStations, setMoreStations] = useState<RadioStation[]>([]);
   const [loadingStations, setLoadingStations] = useState(false);
@@ -394,7 +397,7 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
   // Zoom controls
   const handleZoom = (delta: number) => {
     setZoomLevel((prev) => {
-      const next = Math.max(1.4, Math.min(3.8, prev + delta));
+      const next = Math.max(1.3, Math.min(4.0, prev + delta));
       if (cameraRef.current) {
         cameraRef.current.position.z = next;
       }
@@ -402,13 +405,13 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
     });
   };
 
-  // Setup Three.js Google Earth Viewport
+  // Setup Three.js Google Earth Viewport (Full-screen spherical mesh, responsive)
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
@@ -418,24 +421,25 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
 
     // Deep space background particles
     const starGeo = new THREE.BufferGeometry();
-    const starCount = 300;
+    const starCount = 350;
     const starCoords = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount * 3; i += 3) {
-      starCoords[i] = (Math.random() - 0.5) * 40;
-      starCoords[i + 1] = (Math.random() - 0.5) * 40;
-      starCoords[i + 2] = -5 - Math.random() * 20;
+      starCoords[i] = (Math.random() - 0.5) * 50;
+      starCoords[i + 1] = (Math.random() - 0.5) * 50;
+      starCoords[i + 2] = -5 - Math.random() * 25;
     }
     starGeo.setAttribute("position", new THREE.BufferAttribute(starCoords, 3));
     const starMat = new THREE.PointsMaterial({
       color: 0xffffff,
-      size: 0.04,
+      size: 0.045,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
     });
     const stars = new THREE.Points(starGeo, starMat);
     scene.add(stars);
@@ -447,9 +451,10 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
 
     const globeRadius = 1.0;
 
-    // Load actual Earth texture map
+    // Load actual Earth texture map onto a full-screen spherical mesh
     const textureLoader = new THREE.TextureLoader();
     const earthTexture = textureLoader.load(earthTextureImg);
+    earthTexture.colorSpace = THREE.SRGBColorSpace;
     earthTexture.wrapS = THREE.RepeatWrapping;
     earthTexture.wrapT = THREE.ClampToEdgeWrapping;
 
@@ -486,7 +491,7 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
     scene.add(new THREE.Mesh(haloGeo, haloMat));
 
     // Directional & Ambient Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+    scene.add(new THREE.AmbientLight(0xffffff, 1.3));
     const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
     sunLight.position.set(5, 3, 5);
     scene.add(sunLight);
@@ -523,56 +528,125 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
       globeGroup.add(ring);
     });
 
-    // Touch & Pointer Gesture Handling
+    // Touch & Pointer Gesture Controls (Pinch-to-zoom & Drag-to-rotate)
     let isDragging = false;
+    let isPinching = false;
     let prevPointer = { x: 0, y: 0 };
-    let velocity = { x: 0.001, y: 0.0002 };
+    let dragVelocity = { x: 0.001, y: 0.0002 };
     let initialPinchDistance = 0;
+    let initialPinchZoom = zoomLevel;
+    let touchStartTime = 0;
+    let touchStartPos = { x: 0, y: 0 };
 
-    const getDistance = (t1: React.Touch | Touch, t2: React.Touch | Touch) => {
+    const getTouchDistance = (t1: Touch, t2: Touch) => {
       return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
     };
 
-    const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      if ("touches" in e && e.touches.length === 2) {
-        initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+    const dom = renderer.domElement;
+    dom.style.touchAction = "none";
+
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartTime = Date.now();
+      if (e.touches.length === 2) {
+        isPinching = true;
+        isDragging = false;
+        initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+        if (cameraRef.current) {
+          initialPinchZoom = cameraRef.current.position.z;
+        }
+        e.preventDefault();
         return;
       }
+      if (e.touches.length === 1) {
+        isDragging = true;
+        isPinching = false;
+        targetRotationRef.current = null;
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        prevPointer = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      // Pinch to Zoom
+      if (e.touches.length === 2 && isPinching) {
+        e.preventDefault();
+        const dist = getTouchDistance(e.touches[0], e.touches[1]);
+        if (initialPinchDistance > 10) {
+          const ratio = initialPinchDistance / dist;
+          const nextZ = Math.max(1.3, Math.min(4.0, initialPinchZoom * ratio));
+          if (cameraRef.current) {
+            cameraRef.current.position.z = nextZ;
+          }
+          setZoomLevel(nextZ);
+        }
+        return;
+      }
+
+      // 1-Finger Drag to Rotate
+      if (isDragging && e.touches.length === 1) {
+        e.preventDefault();
+        const cx = e.touches[0].clientX;
+        const cy = e.touches[0].clientY;
+        const dx = cx - prevPointer.x;
+        const dy = cy - prevPointer.y;
+
+        globeGroup.rotation.y += dx * 0.006;
+        globeGroup.rotation.x = Math.max(-1.4, Math.min(1.4, globeGroup.rotation.x + dy * 0.006));
+
+        dragVelocity = {
+          x: dy * 0.0006,
+          y: dx * 0.0006,
+        };
+
+        prevPointer = { x: cx, y: cy };
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) {
+        isDragging = false;
+        isPinching = false;
+
+        // If it was a quick tap with minimal movement (< 10px, < 350ms), raycast select country
+        const tapDuration = Date.now() - touchStartTime;
+        const moveDist = Math.hypot(
+          prevPointer.x - touchStartPos.x,
+          prevPointer.y - touchStartPos.y,
+        );
+        if (tapDuration < 350 && moveDist < 10) {
+          handlePointerClick(touchStartPos.x, touchStartPos.y);
+        }
+      } else if (e.touches.length === 1) {
+        isPinching = false;
+        isDragging = true;
+        prevPointer = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+
+    // Desktop Mouse Drag & Wheel
+    const onMouseDown = (e: MouseEvent) => {
       isDragging = true;
       targetRotationRef.current = null;
-      const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-      const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-      prevPointer = { x: cx, y: cy };
+      prevPointer = { x: e.clientX, y: e.clientY };
     };
 
-    const onPointerMove = (e: MouseEvent | TouchEvent) => {
-      // Pinch to zoom gesture like Google Earth
-      if ("touches" in e && e.touches.length === 2) {
-        const dist = getDistance(e.touches[0], e.touches[1]);
-        const delta = (initialPinchDistance - dist) * 0.005;
-        handleZoom(delta);
-        initialPinchDistance = dist;
-        return;
-      }
-
+    const onMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
-      const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-      const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-      const dx = cx - prevPointer.x;
-      const dy = cy - prevPointer.y;
+      const dx = e.clientX - prevPointer.x;
+      const dy = e.clientY - prevPointer.y;
 
-      globeGroup.rotation.y += dx * 0.006;
-      globeGroup.rotation.x += dy * 0.006;
+      globeGroup.rotation.y += dx * 0.005;
+      globeGroup.rotation.x = Math.max(-1.4, Math.min(1.4, globeGroup.rotation.x + dy * 0.005));
 
-      velocity = {
-        x: dy * 0.0006,
-        y: dx * 0.0006,
+      dragVelocity = {
+        x: dy * 0.0005,
+        y: dx * 0.0005,
       };
 
-      prevPointer = { x: cx, y: cy };
+      prevPointer = { x: e.clientX, y: e.clientY };
     };
 
-    const onPointerUp = () => {
+    const onMouseUp = () => {
       isDragging = false;
     };
 
@@ -582,24 +656,24 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
       handleZoom(e.deltaY * 0.002);
     };
 
-    const dom = renderer.domElement;
-    dom.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("mousemove", onPointerMove);
-    window.addEventListener("mouseup", onPointerUp);
+    dom.addEventListener("touchstart", onTouchStart, { passive: false });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
-    dom.addEventListener("touchstart", onPointerDown, { passive: true });
-    window.addEventListener("touchmove", onPointerMove, { passive: true });
-    window.addEventListener("touchend", onPointerUp);
+    dom.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
     dom.addEventListener("wheel", onWheel, { passive: false });
 
-    // Raycast Click Selection on Country or Sphere
+    // Raycast Selection on Country or Sphere
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const onCanvasClick = (e: MouseEvent) => {
+    const handlePointerClick = (clientX: number, clientY: number) => {
       const rect = dom.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
 
@@ -624,7 +698,8 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
         }
       }
     };
-    dom.addEventListener("click", onCanvasClick);
+
+    dom.addEventListener("click", (e) => handlePointerClick(e.clientX, e.clientY));
 
     // Render loop
     let reqId: number;
@@ -634,12 +709,12 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
       if (targetRotationRef.current) {
         globeGroup.rotation.y += (targetRotationRef.current.y - globeGroup.rotation.y) * 0.08;
         globeGroup.rotation.x += (targetRotationRef.current.x - globeGroup.rotation.x) * 0.08;
-      } else if (!isDragging) {
-        globeGroup.rotation.y += velocity.y;
-        globeGroup.rotation.x += velocity.x * 0.15;
-        velocity.y *= 0.98;
-        velocity.x *= 0.98;
-        if (Math.abs(velocity.y) < 0.0008) velocity.y = 0.001;
+      } else if (!isDragging && !isPinching) {
+        globeGroup.rotation.y += dragVelocity.y;
+        globeGroup.rotation.x += dragVelocity.x * 0.15;
+        dragVelocity.y *= 0.98;
+        dragVelocity.x *= 0.98;
+        if (Math.abs(dragVelocity.y) < 0.0008) dragVelocity.y = 0.001;
       }
 
       renderer.render(scene, camera);
@@ -650,8 +725,8 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
 
     const onResize = () => {
       if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
@@ -661,14 +736,14 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
     return () => {
       cancelAnimationFrame(reqId);
       window.removeEventListener("resize", onResize);
-      dom.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("mousemove", onPointerMove);
-      window.removeEventListener("mouseup", onPointerUp);
-      dom.removeEventListener("touchstart", onPointerDown);
-      window.removeEventListener("touchmove", onPointerMove);
-      window.removeEventListener("touchend", onPointerUp);
+      dom.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
+      dom.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
       dom.removeEventListener("wheel", onWheel);
-      dom.removeEventListener("click", onCanvasClick);
       renderer.dispose();
       sphereGeometry.dispose();
       sphereMaterial.dispose();
@@ -690,7 +765,7 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-140px)] min-h-[540px] overflow-hidden bg-slate-950 text-white select-none">
+    <div className="relative w-full h-full min-h-[100dvh] flex flex-col overflow-hidden bg-slate-950 text-white select-none">
       {/* Hidden Reliable Audio Stream Player */}
       <audio
         ref={audioRef}
@@ -701,39 +776,52 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
         onError={() => setStatusText("Satellite reconnecting, switching relay…")}
       />
 
-      {/* Full-Screen Edge-to-Edge Three.js Canvas Container (Google Earth Style) */}
+      {/* Full-Screen Edge-to-Edge Three.js Canvas Container (Google Earth Style Spherical Mesh) */}
       <div
         ref={mountRef}
-        className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
+        className="absolute inset-0 w-full h-full touch-none cursor-grab active:cursor-grabbing overflow-hidden"
       />
 
       {/* Top Floating Glass Bar */}
-      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20">
         <div className="bg-black/60 backdrop-blur-xl border border-white/15 px-3 py-1.5 rounded-2xl flex items-center gap-2 shadow-xl pointer-events-auto">
           <Globe className="h-4 w-4 text-emerald-400 animate-spin-slow" />
           <span className="text-xs font-bold text-white">Google Earth 3D Radio</span>
-          <span className="text-[10px] text-emerald-400 font-mono">Pinch to Zoom</span>
+          <span className="text-[10px] text-emerald-400 font-mono hidden sm:inline">
+            Pinch & Drag
+          </span>
         </div>
 
-        <div className="bg-black/60 backdrop-blur-xl border border-white/15 px-3 py-1.5 rounded-2xl flex items-center gap-2 shadow-xl pointer-events-auto">
-          <span className="text-base">{selectedCountry.flag}</span>
-          <span className="text-xs font-semibold">{selectedCountry.name}</span>
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <div className="bg-black/60 backdrop-blur-xl border border-white/15 px-3 py-1.5 rounded-2xl flex items-center gap-2 shadow-xl">
+            <span className="text-base">{selectedCountry.flag}</span>
+            <span className="text-xs font-semibold">{selectedCountry.name}</span>
+          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="h-8 w-8 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-xl border border-white/15 text-white flex items-center justify-center shadow-lg"
+              title="Close Earth View"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Right Side Zoom & Reset Controls */}
-      <div className="absolute right-3 top-20 flex flex-col gap-2 pointer-events-auto">
+      <div className="absolute right-3 top-20 flex flex-col gap-2 pointer-events-auto z-20">
         <button
           onClick={() => handleZoom(-0.35)}
           className="h-10 w-10 rounded-2xl bg-black/70 hover:bg-black/90 backdrop-blur-xl border border-white/15 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-          title="Zoom in (Closer to Earth)"
+          title="Zoom in (Pinch out or tap)"
         >
           <Plus className="h-4 w-4" />
         </button>
         <button
           onClick={() => handleZoom(0.35)}
           className="h-10 w-10 rounded-2xl bg-black/70 hover:bg-black/90 backdrop-blur-xl border border-white/15 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
-          title="Zoom out (Space View)"
+          title="Zoom out (Pinch in or tap)"
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -747,7 +835,7 @@ export function RadioGlobe({ onTuneInStation }: RadioGlobeProps) {
       </div>
 
       {/* Bottom Floating Radio Playback Deck */}
-      <div className="absolute bottom-4 left-3 right-3 pointer-events-auto space-y-2">
+      <div className="absolute bottom-4 left-3 right-3 pointer-events-auto space-y-2 z-20 max-w-xl mx-auto">
         {/* Country Quick Switcher Strip */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
           {GLOBAL_COUNTRIES.map((c) => {

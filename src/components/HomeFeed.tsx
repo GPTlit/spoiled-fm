@@ -19,13 +19,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeamlessSlideTrack } from "@/components/SeamlessSlideTrack";
-import jazzCover from "@/assets/images/jazz_atmosphere_1791209221968.jpg";
-import dawnCover from "@/assets/dawn-fm.jpg";
-import afterHoursCover from "@/assets/after-hours.jpg";
-import tranquilityCover from "@/assets/tranquility.jpg";
-import oceanCover from "@/assets/ocean.jpg";
-import nightCover from "@/assets/night.jpg";
-import sunflowerCover from "@/assets/sunflower.jpg";
+import { ARTIST_PROFILES } from "@/lib/artist-catalog";
 
 interface HomeFeedProps {
   onSelectGenre?: (genre: string) => void;
@@ -63,50 +57,6 @@ const GENRES = [
   { name: "Electronic", query: "electronic melodic techno house", count: "160 tracks", icon: "🎛️" },
 ];
 
-// REAL playable YouTube jazz tracks with verified video IDs
-const REAL_JAZZ_TRACKS = [
-  {
-    id: "_tV5_6iK5Vw",
-    title: "So What",
-    artist: "Miles Davis",
-    album: "Kind of Blue (1959)",
-    duration: "9:22",
-    thumbnail: "https://i.ytimg.com/vi/_tV5_6iK5Vw/hqdefault.jpg",
-  },
-  {
-    id: "vmDDOFXSg20",
-    title: "Take Five",
-    artist: "The Dave Brubeck Quartet",
-    album: "Time Out (1959)",
-    duration: "5:24",
-    thumbnail: "https://i.ytimg.com/vi/vmDDOFXSg20/hqdefault.jpg",
-  },
-  {
-    id: "4funBSGzI3k",
-    title: "Watermelon Man",
-    artist: "Herbie Hancock",
-    album: "Head Hunters",
-    duration: "6:29",
-    thumbnail: "https://i.ytimg.com/vi/4funBSGzI3k/hqdefault.jpg",
-  },
-  {
-    id: "0ybMS3qNms4",
-    title: "I Fall in Love Too Easily",
-    artist: "Chet Baker",
-    album: "Chet Baker Sings",
-    duration: "3:19",
-    thumbnail: "https://i.ytimg.com/vi/0ybMS3qNms4/hqdefault.jpg",
-  },
-  {
-    id: "sCQfTNOC5tE",
-    title: "In a Sentimental Mood",
-    artist: "John Coltrane & Duke Ellington",
-    album: "Duke Ellington & John Coltrane",
-    duration: "4:16",
-    thumbnail: "https://i.ytimg.com/vi/sCQfTNOC5tE/hqdefault.jpg",
-  },
-];
-
 // REAL New Releases from top artists with actual YouTube video IDs
 const REAL_NEW_RELEASES = [
   {
@@ -137,6 +87,15 @@ const REAL_NEW_RELEASES = [
     date: "Hit Single",
   },
   {
+    id: "kPa7bsKwL-8",
+    title: "Die With A Smile",
+    artist: "Lady Gaga & Bruno Mars",
+    channel: "Lady Gaga",
+    duration: "4:12",
+    thumbnail: "https://i.ytimg.com/vi/kPa7bsKwL-8/hqdefault.jpg",
+    date: "Worldwide Hit",
+  },
+  {
     id: "BAzP6oE8d_I",
     title: "Lost",
     artist: "Frank Ocean",
@@ -160,39 +119,39 @@ const REAL_NEW_RELEASES = [
 const REAL_POPULAR_ARTISTS = [
   {
     name: "The Weeknd",
-    subscribers: "35M subscribers",
-    cover: afterHoursCover,
-    query: "The Weeknd official music videos",
+    subscribers: "35.8M subscribers",
+    cover: ARTIST_PROFILES["The Weeknd"].cover,
+    query: "The Weeknd",
   },
   {
     name: "Kendrick Lamar",
-    subscribers: "15M subscribers",
-    cover: nightCover,
-    query: "Kendrick Lamar official music",
+    subscribers: "15.4M subscribers",
+    cover: ARTIST_PROFILES["Kendrick Lamar"].cover,
+    query: "Kendrick Lamar",
   },
   {
     name: "Billie Eilish",
-    subscribers: "50M subscribers",
-    cover: sunflowerCover,
-    query: "Billie Eilish official music videos",
+    subscribers: "50.9M subscribers",
+    cover: ARTIST_PROFILES["Billie Eilish"].cover,
+    query: "Billie Eilish",
   },
   {
     name: "Daft Punk",
-    subscribers: "6.5M subscribers",
-    cover: dawnCover,
-    query: "Daft Punk official channel",
+    subscribers: "6.52M subscribers",
+    cover: ARTIST_PROFILES["Daft Punk"].cover,
+    query: "Daft Punk",
   },
   {
     name: "Frank Ocean",
-    subscribers: "4.8M subscribers",
-    cover: tranquilityCover,
-    query: "Frank Ocean official songs",
+    subscribers: "4.85M subscribers",
+    cover: ARTIST_PROFILES["Frank Ocean"].cover,
+    query: "Frank Ocean",
   },
   {
-    name: "Miles Davis",
-    subscribers: "1.2M subscribers",
-    cover: jazzCover,
-    query: "Miles Davis full album jazz",
+    name: "Bruno Mars",
+    subscribers: "38.5M subscribers",
+    cover: ARTIST_PROFILES["Bruno Mars"].cover,
+    query: "Bruno Mars",
   },
 ];
 
@@ -337,69 +296,7 @@ export function HomeFeed({
         </div>
       </div>
 
-      {/* Section 2: Real YouTube Jazz Showcase */}
-      <div className="rounded-3xl border border-white/40 dark:border-white/10 bg-white/40 dark:bg-white/5 backdrop-blur-2xl shadow-xl overflow-hidden">
-        <div className="relative h-44 w-full overflow-hidden">
-          <img
-            src={jazzCover}
-            alt="Jazz Classics"
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
-          <div className="absolute bottom-3 left-4 right-4 text-white">
-            <span className="text-[10px] uppercase font-mono tracking-widest text-amber-400">
-              YOUTUBE JAZZ LEGENDS
-            </span>
-            <h3 className="text-lg font-bold tracking-tight">Essential Jazz Masterpieces</h3>
-            <p className="text-xs text-white/80 mt-0.5">
-              Tap any song to play the real YouTube release immediately in the Video Player
-            </p>
-          </div>
-        </div>
-
-        {/* Real YouTube Jazz Songs List */}
-        <div className="p-2 divide-y divide-white/5">
-          {REAL_JAZZ_TRACKS.map((track) => (
-            <div
-              key={track.id}
-              onClick={() => handlePlayRealVideo(track)}
-              className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-white/40 dark:hover:bg-white/10 cursor-pointer transition-colors group"
-            >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-black shrink-0 shadow-md">
-                  <img
-                    src={track.thumbnail}
-                    alt={track.title}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Play className="h-4 w-4 fill-white text-white" />
-                  </div>
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <strong className="block text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                    {track.title}
-                  </strong>
-                  <span className="text-[11px] text-muted-foreground truncate block">
-                    {track.artist} · {track.album}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground shrink-0 ml-2">
-                <span>{track.duration}</span>
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                  <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Section 3: New Releases for You (Real YouTube Hits) */}
+      {/* Section 2: New Releases for You (Real YouTube Hits) */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -456,7 +353,7 @@ export function HomeFeed({
         </SeamlessSlideTrack>
       </div>
 
-      {/* Section 4: Popular Artists Channels from YouTube */}
+      {/* Section 3: Popular Artists Channels from YouTube */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -473,7 +370,7 @@ export function HomeFeed({
           {REAL_POPULAR_ARTISTS.map((artist) => (
             <div
               key={artist.name}
-              onClick={() => onSelectArtist?.(artist.query)}
+              onClick={() => onSelectArtist?.(artist.name)}
               className="w-24 shrink-0 text-center group cursor-pointer"
             >
               <div className="relative w-20 h-20 mx-auto rounded-full overflow-hidden mb-2 border-2 border-white/50 dark:border-white/20 shadow-md">
@@ -482,6 +379,12 @@ export function HomeFeed({
                   alt={artist.name}
                   className="w-full h-full object-cover transition-transform group-hover:scale-105"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    const profile = ARTIST_PROFILES[artist.name];
+                    if (profile?.fallbackCover) {
+                      e.currentTarget.src = profile.fallbackCover;
+                    }
+                  }}
                 />
                 <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <Youtube className="h-5 w-5 text-red-500" />
@@ -536,7 +439,7 @@ export function HomeFeed({
                   <div
                     className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border ${
                       isPlayingThis
-                        ? "bg-emerald-500 text-slate-950 border-emerald-400 animate-pulse"
+                        ? "bg-emerald-500 text-slate-950 border-emerald-400 font-bold"
                         : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
                     }`}
                   >

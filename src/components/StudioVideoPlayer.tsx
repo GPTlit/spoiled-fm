@@ -461,7 +461,7 @@ export function StudioVideoPlayer({
 
   return (
     <div
-      className="studio-video-suite relative w-full h-full min-h-[92vh] flex flex-col bg-black text-white select-none overflow-hidden"
+      className="studio-video-suite relative w-full max-w-[100vw] h-full min-h-[92vh] flex flex-col bg-black text-white select-none overflow-x-hidden box-border mx-auto"
       onClick={resetAutoHideTimer}
     >
       <input
@@ -573,28 +573,30 @@ export function StudioVideoPlayer({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="relative flex-1 w-full bg-black flex items-center justify-center overflow-hidden"
+        className="relative flex-1 w-full max-w-[100vw] bg-black flex items-center justify-center overflow-hidden"
       >
         {hasVideoLoaded ? (
           <>
             {currentVideoSrc ? (
-              <video
-                ref={videoRef}
-                src={currentVideoSrc}
-                playsInline
-                autoPlay
-                className={`${getAspectRatioClasses()} transition-transform duration-150`}
-                style={{ filter: computedFilterStyle }}
-              />
+              <div className="w-full max-w-[100vw] aspect-video overflow-hidden flex items-center justify-center">
+                <video
+                  ref={videoRef}
+                  src={currentVideoSrc}
+                  playsInline
+                  autoPlay
+                  className="w-full h-full object-contain max-w-full block transition-transform duration-150"
+                  style={{ filter: computedFilterStyle }}
+                />
+              </div>
             ) : currentVideoId ? (
               <div
-                className="w-full h-full flex items-center justify-center"
+                className="w-full max-w-[100vw] aspect-video overflow-hidden flex items-center justify-center"
                 style={{ filter: computedFilterStyle }}
               >
                 <iframe
                   src={`https://www.youtube-nocookie.com/embed/${currentVideoId}?autoplay=1&enablejsapi=1&playsinline=1&rel=0`}
                   title={currentTitle}
-                  className="w-full h-full border-0"
+                  className="w-full h-full object-contain max-w-full block border-0"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                 />

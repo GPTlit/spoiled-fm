@@ -261,6 +261,8 @@ function MusicApp() {
   const [onlineVideos, setOnlineVideos] = useState<OnlineVideo[]>([]);
   const [onlineLoading, setOnlineLoading] = useState(false);
   const [activeWatchVideo, setActiveWatchVideo] = useState<OnlineVideo | null>(null);
+  const [activeExploreVideo, setActiveExploreVideo] = useState<OnlineVideo | null>(null);
+  const [selectedExploreArtist, setSelectedExploreArtist] = useState<string | null>(null);
   const [isPipMode, setIsPipMode] = useState(false);
   const [youtubeQuery, setYoutubeQuery] = useState("");
   const [relatedVideos, setRelatedVideos] = useState<OnlineVideo[]>([]);
@@ -650,6 +652,14 @@ function MusicApp() {
     if (!pip) {
       go(useStudioPlayer ? "studio" : "watch");
     }
+  };
+
+  const openVideoInExplore = (video: OnlineVideo) => {
+    if (p.playing) p.toggle(); // Gracefully pause local audio when watching video
+    setActiveWatchVideo(video);
+    setActiveExploreVideo(video);
+    setSelectedExploreArtist(null);
+    go("explore");
   };
 
   // Fetch related songs whenever activeWatchVideo changes
@@ -1102,8 +1112,12 @@ function MusicApp() {
   const activeNav = (
     ["now", "lyrics", "queue", "album", "playlist", "liked", "search", "settings"] as Screen[]
   ).includes(screen)
-    ? previous
-    : screen;
+    ? previous === "watch"
+      ? "explore"
+      : previous
+    : screen === "watch"
+      ? "explore"
+      : screen;
 
   const isVelvet = theme.startsWith("Velvet");
   const isDark =
@@ -1430,6 +1444,7 @@ function MusicApp() {
                 <HomeFeed
                   onSelectGenre={(genre) => {
                     setQuery(genre);
+                    setSelectedExploreArtist(null);
                     go("explore");
                   }}
                   onPlayStation={(name) => {
@@ -1438,8 +1453,12 @@ function MusicApp() {
                   }}
                   onOpenRadioGlobe={() => go("globe")}
                   onSelectArtist={(artist) => {
-                    setQuery(artist);
+                    setSelectedExploreArtist(artist);
+                    setActiveExploreVideo(null);
                     go("explore");
+                  }}
+                  onPlayVideo={(video) => {
+                    openVideoInExplore(video);
                   }}
                 />
               </div>
@@ -1585,7 +1604,14 @@ function MusicApp() {
 
               <DiscoverSearch
                 initialQuery={youtubeQuery || query}
-                onSelectVideo={(vid) => watchVideo(vid)}
+                activeVideo={activeExploreVideo}
+                onCloseActiveVideo={() => setActiveExploreVideo(null)}
+                selectedArtist={selectedExploreArtist}
+                onSelectArtist={(artist) => setSelectedExploreArtist(artist)}
+                onSelectVideo={(vid) => {
+                  setActiveWatchVideo(vid);
+                  setActiveExploreVideo(vid);
+                }}
                 onOpenDownloadModal={(vid, type) => openDownloadModal(vid, type)}
               />
             </>
@@ -1610,8 +1636,8 @@ function MusicApp() {
                 </Button>
               </header>
 
-              <div className="profile-card">
-                <div className="profile-avatar-frame">
+              <div className="profile-card flex flex-col items-center text-center gap-3 w-full p-4 box-border">
+                <div className="profile-avatar-frame shrink-0">
                   {typeof account?.user_metadata?.["avatar_url"] === "string" ? (
                     <img
                       src={account.user_metadata["avatar_url"]}
@@ -1622,51 +1648,83 @@ function MusicApp() {
                     <User className="h-8 w-8 text-foreground" />
                   )}
                 </div>
-                <div className="profile-info">
-                  <h2>{accountName}</h2>
-                  <p>{account?.email || "Local Offline Guest Listener"}</p>
-                  <span className="profile-badge">
-                    <UserCheck className="h-3.5 w-3.5" />
-                    {account ? "Google Account Connected" : "Local Device Profile"}
+                <div className="profile-info flex flex-col items-center text-center min-w-0 w-full">
+                  <h2 className="text-xl font-bold min-w-0 max-w-full truncate [word-break:break-all]">
+                    {accountName}
+                  </h2>
+                  <p className="text-xs text-muted-foreground min-w-0 max-w-full truncate [word-break:break-all] mt-0.5">
+                    {account?.email || "Local Offline Guest Listener"}
+                  </p>
+                  <span className="profile-badge mt-1 inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-sky-600 dark:text-sky-400">
+                    <UserCheck className="h-3.5 w-3.5 shrink-0" />
+                    <span>{account ? "Google Account Connected" : "Local Device Profile"}</span>
                   </span>
                 </div>
                 {account ? (
-                  <div className="account-controls">
+                  <div className="profile-actions-stack flex flex-col gap-2.5 w-full mt-3">
                     <Button
                       variant="outline"
+                      className="w-full font-semibold"
                       onClick={() => switchAccount()}
                       disabled={accountBusy}
                     >
-                      Switch account
-                    </Button>
-                    <Button variant="outline" onClick={signOut} disabled={accountBusy}>
-                      Sign out
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="account-controls">
-                    <Button onClick={signIn} disabled={accountBusy}>
-                      Sign in with Google
+                      Switch Account
                     </Button>
                     <Button
                       variant="outline"
+                      className="w-full font-semibold"
+                      onClick={signOut}
+                      disabled={accountBusy}
+                    >
+                      Sign Out
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="w-full text-xs text-muted-foreground"
+                      onClick={() => {
+                        setAuthMode("signup");
+                        setAuthOpen(true);
+                      }}
+                      disabled={accountBusy}
+                    >
+                      Add Account
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="profile-actions-stack flex flex-col gap-2.5 w-full mt-3">
+                    <Button
+                      className="w-full font-semibold"
+                      onClick={signIn}
+                      disabled={accountBusy}
+                    >
+                      Sign In with Google
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full font-semibold"
                       onClick={() => setAuthOpen(true)}
                       disabled={accountBusy}
                     >
-                      Email & password
+                      Use Email & Password
                     </Button>
                   </div>
                 )}
                 {recentAccounts.filter((e) => e !== account?.email).length > 0 && (
-                  <div className="recent-accounts">
-                    <small>Switch to</small>
-                    {recentAccounts
-                      .filter((e) => e !== account?.email)
-                      .map((e) => (
-                        <button key={e} onClick={() => switchAccount(e)}>
-                          {e}
-                        </button>
-                      ))}
+                  <div className="recent-accounts w-full flex flex-col items-center gap-1.5 mt-2 pt-2 border-t border-white/10">
+                    <small className="text-[11px] text-muted-foreground">Switch to account</small>
+                    <div className="flex flex-wrap justify-center gap-1.5 w-full">
+                      {recentAccounts
+                        .filter((e) => e !== account?.email)
+                        .map((e) => (
+                          <button
+                            key={e}
+                            className="px-2.5 py-1 text-xs rounded-full border border-border bg-white/20 dark:bg-white/5 truncate max-w-[200px]"
+                            onClick={() => switchAccount(e)}
+                          >
+                            {e}
+                          </button>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2065,7 +2123,7 @@ function MusicApp() {
           )}
 
           {screen === "watch" && (
-            <div className="watch-screen">
+            <div className="watch-screen w-full max-w-[100vw] overflow-x-hidden box-border mx-auto">
               {activeWatchVideo ? (
                 <>
                   <header className="page-head">
@@ -2119,11 +2177,11 @@ function MusicApp() {
                     </div>
                   </header>
 
-                  <div className="watch-screen-grid">
+                  <div className="watch-screen-grid w-full max-w-[100vw] overflow-x-hidden box-border">
                     {/* Main Video & Meta Column */}
-                    <div className="watch-main-column">
+                    <div className="watch-main-column w-full max-w-[100vw] overflow-x-hidden box-border">
                       {useStudioPlayer ? (
-                        <div className="mb-4">
+                        <div className="mb-4 w-full max-w-[100vw] overflow-hidden box-border">
                           <StudioVideoPlayer
                             videoId={activeWatchVideo.id}
                             title={activeWatchVideo.title}
@@ -2136,10 +2194,11 @@ function MusicApp() {
                           />
                         </div>
                       ) : (
-                        <div className="watch-video-wrapper">
+                        <div className="watch-video-wrapper w-full max-w-[100vw] aspect-video overflow-hidden box-border">
                           <iframe
                             src={getYoutubeEmbedUrl(activeWatchVideo.id)}
                             title={activeWatchVideo.title}
+                            className="w-full h-full object-contain max-w-full block border-0"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                             allowFullScreen
                           />
@@ -2877,18 +2936,9 @@ function MusicApp() {
           )}
 
           {screen === "globe" && (
-            <div className="radio-globe-screen space-y-4">
-              <header className="page-head">
-                <Button variant="ghost" size="icon" className="glass-icon-btn" onClick={back}>
-                  <ArrowLeft />
-                </Button>
-                <div className="flex-1 text-center">
-                  <span className="eyebrow">WORLD BROADCAST SATELLITES</span>
-                  <h1 className="text-lg font-bold">3D Earth Radio Globe</h1>
-                </div>
-                <div style={{ width: 44 }} />
-              </header>
+            <div className="radio-globe-screen fixed inset-0 z-50 flex flex-col bg-slate-950 text-white w-full h-full">
               <RadioGlobe
+                onClose={back}
                 onTuneInStation={(st) => {
                   setMessage(`Tuned to ${st.name} [${st.country}]`);
                 }}

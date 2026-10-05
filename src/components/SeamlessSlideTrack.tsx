@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, type ReactNode } from "react";
+import { useRef, useState, useEffect, useCallback, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface SeamlessSlideTrackProps {
@@ -10,33 +10,47 @@ interface SeamlessSlideTrackProps {
 export function SeamlessSlideTrack({
   children,
   className = "",
-  showArrows = false,
+  showArrows = true,
 }: SeamlessSlideTrackProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const slideBarRef = useRef<HTMLDivElement>(null);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [canScroll, setCanScroll] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const scrollLeftRef = useRef(0);
 
-  const checkScroll = () => {
+  const updateScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 6);
-    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 6);
-  };
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    if (maxScroll > 4) {
+      setCanScroll(true);
+      const progress = Math.max(0, Math.min(1, el.scrollLeft / maxScroll));
+      setScrollProgress(progress);
+      setCanScrollLeft(el.scrollLeft > 6);
+      setCanScrollRight(el.scrollLeft < maxScroll - 6);
+    } else {
+      setCanScroll(false);
+      setScrollProgress(0);
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+    }
+  }, []);
 
   useEffect(() => {
-    checkScroll();
+    updateScroll();
     const el = containerRef.current;
     if (!el) return;
-    el.addEventListener("scroll", checkScroll, { passive: true });
-    window.addEventListener("resize", checkScroll);
+    el.addEventListener("scroll", updateScroll, { passive: true });
+    window.addEventListener("resize", updateScroll);
     return () => {
-      el.removeEventListener("scroll", checkScroll);
-      window.removeEventListener("resize", checkScroll);
+      el.removeEventListener("scroll", updateScroll);
+      window.removeEventListener("resize", updateScroll);
     };
-  }, [children]);
+  }, [children, updateScroll]);
 
   // Smooth scroll helper
   const scrollBy = (amount: number) => {
@@ -44,7 +58,7 @@ export function SeamlessSlideTrack({
     containerRef.current.scrollBy({ left: amount, behavior: "smooth" });
   };
 
-  // Drag-to-scroll for mouse / desktop
+  // Drag on container
   const handleMouseDown = (e: React.MouseEvent) => {
     const el = containerRef.current;
     if (!el) return;
@@ -65,58 +79,90 @@ export function SeamlessSlideTrack({
     isDraggingRef.current = false;
   };
 
+  // Click or drag on the green slide bar itself to slide left/right smoothly
+  const handleSlideBarPointer = (
+    e: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>,
+  ) => {
+    const bar = slideBarRef.current;
+    const container = containerRef.current;
+    if (!bar || !container) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    container.scrollTo({ left: ratio * maxScroll, behavior: "smooth" });
+  };
+
   return (
-    <div className={`relative group/track w-full ${className}`}>
-      {/* Left Fade Gradient Mask */}
-      <div
-        className={`pointer-events-none absolute left-0 top-0 bottom-0 w-8 z-10 bg-gradient-to-r from-background via-background/80 to-transparent transition-opacity duration-200 ${
-          canScrollLeft ? "opacity-100" : "opacity-0"
-        }`}
-      />
-
-      {/* Right Fade Gradient Mask */}
-      <div
-        className={`pointer-events-none absolute right-0 top-0 bottom-0 w-8 z-10 bg-gradient-to-l from-background via-background/80 to-transparent transition-opacity duration-200 ${
-          canScrollRight ? "opacity-100" : "opacity-0"
-        }`}
-      />
-
-      {/* Optional Left Scroll Arrow */}
-      {showArrows && canScrollLeft && (
-        <button
-          onClick={() => scrollBy(-180)}
-          className="absolute left-1 top-1/2 -translate-y-1/2 z-20 h-7 w-7 rounded-full bg-black/70 hover:bg-black/90 text-white/90 flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md transition-all active:scale-90"
-          aria-label="Scroll left"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-      )}
-
-      {/* Optional Right Scroll Arrow */}
-      {showArrows && canScrollRight && (
-        <button
-          onClick={() => scrollBy(180)}
-          className="absolute right-1 top-1/2 -translate-y-1/2 z-20 h-7 w-7 rounded-full bg-black/70 hover:bg-black/90 text-white/90 flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md transition-all active:scale-90"
-          aria-label="Scroll right"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      )}
-
-      {/* Scrollable Container */}
+    <div className={`relative w-full ${className}`}>
+      {/* Scrollable Items Container: Native gray scrollbars 100% removed */}
       <div
         ref={containerRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUpOrLeave}
         onMouseLeave={handleMouseUpOrLeave}
-        className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth cursor-grab active:cursor-grabbing py-1 px-1 touch-pan-x"
+        className="seamless-slide-container flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth cursor-grab active:cursor-grabbing py-1 px-0.5 touch-pan-x select-none"
         style={{
           WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
         }}
       >
         {children}
       </div>
+
+      {/* Visual Green Slide Bar Indicator (Only the green one down here is visible) */}
+      {canScroll && (
+        <div className="flex items-center justify-between gap-3 pt-2 pb-1 px-1">
+          {showArrows && (
+            <button
+              onClick={() => scrollBy(-180)}
+              disabled={!canScrollLeft}
+              className={`h-6 w-6 rounded-full flex items-center justify-center transition-all ${
+                canScrollLeft
+                  ? "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white shadow-xs border border-slate-300/80 dark:border-slate-700/80"
+                  : "opacity-25 cursor-not-allowed text-muted-foreground"
+              }`}
+              title="Slide left to see previous items"
+              aria-label="Slide left"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {/* Interactive Slide Bar Track with Sliding Green Indicator */}
+          <div
+            ref={slideBarRef}
+            onClick={handleSlideBarPointer}
+            className="flex-1 max-w-[220px] mx-auto h-2 rounded-full bg-slate-200/90 dark:bg-slate-800/90 border border-slate-300/80 dark:border-slate-700/80 p-0.5 cursor-pointer relative overflow-hidden"
+            title="Slide left or right to explore"
+          >
+            <div
+              className="h-full bg-emerald-500 rounded-full shadow-xs transition-transform duration-75"
+              style={{
+                width: "30%",
+                transform: `translateX(${scrollProgress * 233}%)`,
+              }}
+            />
+          </div>
+
+          {showArrows && (
+            <button
+              onClick={() => scrollBy(180)}
+              disabled={!canScrollRight}
+              className={`h-6 w-6 rounded-full flex items-center justify-center transition-all ${
+                canScrollRight
+                  ? "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white shadow-xs border border-slate-300/80 dark:border-slate-700/80"
+                  : "opacity-25 cursor-not-allowed text-muted-foreground"
+              }`}
+              title="Slide right to see more items"
+              aria-label="Slide right"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

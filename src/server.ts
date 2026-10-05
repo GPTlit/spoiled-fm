@@ -116,7 +116,7 @@ export default {
     if (url.pathname === "/api/youtube/search" && request.method === "GET") {
       const q = url.searchParams.get("q") || "";
       const videos = await searchYouTube(q);
-      return new Response(JSON.stringify({ videos }), {
+      return new Response(JSON.stringify({ videos, results: videos }), {
         headers: { "content-type": "application/json" },
       });
     }

@@ -177,10 +177,37 @@ export function StudioVideoPlayer({
   const [clipExportStatus, setClipExportStatus] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const lastTapRef = useRef<{ time: number; side: "left" | "right" } | null>(null);
   const touchStartYRef = useRef<{ y: number; side: "left" | "right"; initialVal: number } | null>(
     null,
   );
+
+  // Fullscreen change listener
+  useEffect(() => {
+    const handleFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleFs);
+    return () => document.removeEventListener("fullscreenchange", handleFs);
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      try {
+        await containerRef.current.requestFullscreen();
+        setIsFullscreen(true);
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      } catch {
+        // ignore
+      }
+    }
+  };
 
   // Load history on mount
   useEffect(() => {
@@ -461,6 +488,7 @@ export function StudioVideoPlayer({
 
   return (
     <div
+      ref={containerRef}
       className="studio-video-suite relative w-full max-w-[100vw] h-full min-h-[92vh] flex flex-col bg-black text-white select-none overflow-x-hidden box-border mx-auto"
       onClick={resetAutoHideTimer}
     >
@@ -820,18 +848,54 @@ export function StudioVideoPlayer({
             ))}
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-white/10 px-2 py-1 rounded-full border border-white/10">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-white/70 hover:text-white p-0"
+                onClick={() => setIsMuted(!isMuted)}
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="h-4 w-4 text-red-400" />
+                ) : (
+                  <Volume2 className="h-4 w-4 text-emerald-400" />
+                )}
+              </Button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setVolume(val);
+                  if (val === 0) {
+                    setIsMuted(true);
+                  } else {
+                    if (isMuted) setIsMuted(false);
+                  }
+                  if (videoRef.current) {
+                    videoRef.current.volume = val / 100;
+                  }
+                }}
+                className="w-16 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                title={`Volume: ${isMuted ? 0 : volume}%`}
+              />
+              <span className="text-[10px] font-mono text-white/60 w-6 text-right">
+                {isMuted ? "0%" : `${volume}%`}
+              </span>
+            </div>
+
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-white/70 hover:text-white"
-              onClick={() => setIsMuted(!isMuted)}
+              className="h-8 w-8 text-white/70 hover:text-white rounded-full bg-white/10 hover:bg-white/20 border border-white/10"
+              onClick={handleToggleFullscreen}
+              title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
             >
-              {isMuted || volume === 0 ? (
-                <VolumeX className="h-4 w-4" />
-              ) : (
-                <Volume2 className="h-4 w-4" />
-              )}
+              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
             </Button>
           </div>
         </div>

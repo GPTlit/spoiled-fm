@@ -81,7 +81,12 @@ import { StudioVideoPlayer } from "@/components/StudioVideoPlayer";
 import { CameraPhotoEditor } from "@/components/CameraPhotoEditor";
 import { ProfileAdmin } from "@/components/ProfileAdmin";
 import { getAppTitle, getAppLogo } from "@/lib/user-preferences";
-import { Globe, Camera as CameraIcon, Palette } from "lucide-react";
+import { Globe, Camera as CameraIcon, Palette, Pencil } from "lucide-react";
+import {
+  downloadViaNativeDevice,
+  isNativeAndroidApp,
+  importNativeAudioToLibrary,
+} from "@/lib/native-downloader";
 
 type Screen =
   | "home"
@@ -116,6 +121,14 @@ const nav: { screen: Screen; label: string; icon: typeof Home }[] = [
   { screen: "profile", label: "Profile", icon: UserCheck },
 ];
 
+function RootMusicApp() {
+  return (
+    <PlayerProvider>
+      <MusicApp />
+    </PlayerProvider>
+  );
+}
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
@@ -134,11 +147,7 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: () => (
-    <PlayerProvider>
-      <MusicApp />
-    </PlayerProvider>
-  ),
+  component: RootMusicApp,
 });
 
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
@@ -275,6 +284,12 @@ function MusicApp() {
   const [downloadProgressText, setDownloadProgressText] = useState("");
   const [downloads, setDownloads] = useState<{ id: string; title: string; status: string }[]>([]);
   const [editInfo, setEditInfo] = useState(false);
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [selectedMenuTrack, setSelectedMenuTrack] = useState<Track | null>(null);
+  const [exploreRefreshKey, setExploreRefreshKey] = useState(0);
+  const [downloadRouteMode, setDownloadRouteMode] = useState<"auto" | "server" | "native">(
+    isNativeAndroidApp() ? "native" : "auto",
+  );
   const [infoDraft, setInfoDraft] = useState({ title: "", artist: "", album: "" });
 
   const [savedReady, setSavedReady] = useState(false);
@@ -568,6 +583,18 @@ function MusicApp() {
     setMenu(null);
   };
 
+  const handleNavClick = (s: Screen) => {
+    if (s === "explore") {
+      setActiveExploreVideo(null);
+      setSelectedExploreArtist(null);
+      setYoutubeQuery("");
+      setExploreRefreshKey((k) => k + 1);
+      go("explore");
+    } else {
+      go(s);
+    }
+  };
+
   const back = () => {
     setScreen(previous === screen ? "home" : previous);
     setMenu(null);
@@ -743,9 +770,10 @@ function MusicApp() {
   const handleDownloadFile = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
+    const vid = downloadModalVideo;
     setDownloads((items) => [
-      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Downloading" },
-      ...items.filter((item) => item.id !== downloadModalVideo.id),
+      { id: vid.id, title: vid.title, status: "Downloading" },
+      ...items.filter((item) => item.id !== vid.id),
     ]);
     setDownloadModalOpen(false);
     setDownloadProgressText(
@@ -754,58 +782,111 @@ function MusicApp() {
         : `Rendering ${selectedQuality}p MP4 video...`,
     );
 
-    try {
-      const vid = downloadModalVideo;
-      const setStatus = (status: string) =>
-        setDownloads((items) =>
-          items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
-        );
-      const res = await fetchMediaWithFallback(
-        vid.id,
-        downloadType,
-        selectedQuality,
-        vid.title,
-        setStatus,
+    const setStatus = (status: string) =>
+      setDownloads((items) =>
+        items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
       );
 
-      if (!res) {
-        setStatus("Sources busy — tap Download again");
-        setMessage("All download sources are busy right now. Try again in a minute.");
-        return;
+    try {
+      let blob: Blob | undefined;
+      let ext = downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4";
+      let downloadedFilename = "";
+
+      if (downloadRouteMode === "native") {
+        // Direct Client / Native Android Phone Network Route
+        setStatus("Connecting via direct client device network…");
+        const nativeRes = await downloadViaNativeDevice({
+          videoId: vid.id,
+          title: vid.title,
+          channel: vid.channel,
+          type: downloadType,
+          quality: selectedQuality,
+          onStatus: setStatus,
+        });
+
+        if (nativeRes.success && nativeRes.blob) {
+          blob = nativeRes.blob;
+          ext = nativeRes.ext || ext;
+          downloadedFilename = nativeRes.filename || `${vid.title}.${ext}`;
+        } else {
+          setStatus(
+            "Stream restricted by provider. Try direct device download or open link directly.",
+          );
+          setMessage(
+            "Stream restricted by provider. Try direct device download or open link directly.",
+          );
+          return;
+        }
+      } else {
+        // Route A: Existing server download pipeline
+        setStatus("Fetching via cloud server (Route A)…");
+        let res: Response | null = null;
+        try {
+          res = await fetchMediaWithFallback(
+            vid.id,
+            downloadType,
+            selectedQuality,
+            vid.title,
+            setStatus,
+          );
+        } catch {
+          res = null;
+        }
+
+        if (!res || !res.ok) {
+          // Automatic Fallback to Native Client Route!
+          setStatus("Cloud busy — falling back to Direct Device Download…");
+          const nativeRes = await downloadViaNativeDevice({
+            videoId: vid.id,
+            title: vid.title,
+            channel: vid.channel,
+            type: downloadType,
+            quality: selectedQuality,
+            onStatus: setStatus,
+          });
+
+          if (nativeRes.success && nativeRes.blob) {
+            blob = nativeRes.blob;
+            ext = nativeRes.ext || ext;
+            downloadedFilename = nativeRes.filename || `${vid.title}.${ext}`;
+          } else {
+            setStatus(
+              "Stream restricted by provider. Try direct device download or open link directly.",
+            );
+            setMessage(
+              "Stream restricted by provider. Try direct device download or open link directly.",
+            );
+            return;
+          }
+        } else {
+          blob = await res.blob();
+          ext =
+            res.headers.get("x-spoiled-ext") ||
+            (downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4");
+          const sanitized = vid.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
+          downloadedFilename = `${sanitized}.${ext}`;
+        }
       }
 
-      setDownloadProgressText("Transferring file to your downloads...");
-      const blob = await res.blob();
-      const ext =
-        res.headers.get("x-spoiled-ext") ||
-        (downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4");
-      const sanitized =
-        downloadModalVideo.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
-      const filename = `${sanitized}.${ext}`;
+      if (blob) {
+        setDownloadProgressText("Transferring file to your downloads…");
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = downloadedFilename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Saved to device" } : item,
-        ),
-      );
-      setMessage(`Downloaded "${filename}" successfully!`);
-      setDownloadModalOpen(false);
+        setStatus("Saved to device");
+        setMessage(`Downloaded "${downloadedFilename}" successfully!`);
+      }
     } catch (err: unknown) {
       console.error("Download error:", err);
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
-        ),
+      setStatus("Stream restricted by provider. Try direct device download or open link directly.");
+      setMessage(
+        "Stream restricted by provider. Try direct device download or open link directly.",
       );
-      setMessage("Download failed. Please try again later.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -815,54 +896,109 @@ function MusicApp() {
   const handleSaveToLocalLibrary = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
+    const vid = downloadModalVideo;
     setDownloads((items) => [
-      { id: downloadModalVideo.id, title: downloadModalVideo.title, status: "Adding to library" },
-      ...items.filter((item) => item.id !== downloadModalVideo.id),
+      { id: vid.id, title: vid.title, status: "Adding to library" },
+      ...items.filter((item) => item.id !== vid.id),
     ]);
     setDownloadModalOpen(false);
     setDownloadProgressText("Importing audio into your library...");
 
+    const setStatus = (status: string) =>
+      setDownloads((items) =>
+        items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
+      );
+
     try {
-      const vid = downloadModalVideo;
-      const setStatus = (status: string) =>
-        setDownloads((items) =>
-          items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
-        );
-      const res = await fetchMediaWithFallback(vid.id, "audio", "320", vid.title, setStatus);
-      if (!res) {
-        setStatus("Sources busy — tap Add again");
-        setMessage("All download sources are busy right now. Try again in a minute.");
-        return;
+      let blob: Blob | undefined;
+      let ext = "mp3";
+
+      if (downloadRouteMode === "native") {
+        setStatus("Connecting via direct client device network…");
+        const nativeRes = await downloadViaNativeDevice({
+          videoId: vid.id,
+          title: vid.title,
+          channel: vid.channel,
+          type: "audio",
+          quality: "320",
+          onStatus: setStatus,
+        });
+
+        if (nativeRes.success && nativeRes.blob) {
+          blob = nativeRes.blob;
+          ext = nativeRes.ext || "mp3";
+        } else {
+          setStatus(
+            "Stream restricted by provider. Try direct device download or open link directly.",
+          );
+          setMessage(
+            "Stream restricted by provider. Try direct device download or open link directly.",
+          );
+          return;
+        }
+      } else {
+        // Route A: Existing server download pipeline
+        let res: Response | null = null;
+        try {
+          res = await fetchMediaWithFallback(vid.id, "audio", "320", vid.title, setStatus);
+        } catch {
+          res = null;
+        }
+
+        if (!res || !res.ok) {
+          // Automatic fallback to Native Device Route
+          setStatus("Cloud busy — falling back to Direct Device Download…");
+          const nativeRes = await downloadViaNativeDevice({
+            videoId: vid.id,
+            title: vid.title,
+            channel: vid.channel,
+            type: "audio",
+            quality: "320",
+            onStatus: setStatus,
+          });
+
+          if (nativeRes.success && nativeRes.blob) {
+            blob = nativeRes.blob;
+            ext = nativeRes.ext || "mp3";
+          } else {
+            setStatus(
+              "Stream restricted by provider. Try direct device download or open link directly.",
+            );
+            setMessage(
+              "Stream restricted by provider. Try direct device download or open link directly.",
+            );
+            return;
+          }
+        } else {
+          blob = await res.blob();
+          ext = res.headers.get("x-spoiled-ext") || "mp3";
+        }
       }
 
-      const blob = await res.blob();
-      const ext = res.headers.get("x-spoiled-ext") || "mp3";
-      const mime =
-        blob.type && blob.type.startsWith("audio")
-          ? blob.type
-          : ext === "mp3"
-            ? "audio/mpeg"
-            : `audio/${ext === "m4a" ? "mp4" : ext}`;
-      const file = new File([blob], `${downloadModalVideo.title}.${ext}`, { type: mime });
-      const before = new Set(p.library.map((track) => track.id));
-      await p.addFiles([file]);
-      // The imported track is committed on the next render.
-      pendingArtwork.current = { previousIds: before, thumbnail: downloadModalVideo.thumbnail };
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Added to library" } : item,
-        ),
-      );
-      setMessage(`"${downloadModalVideo.title}" added to your local library!`);
-      setDownloadModalOpen(false);
+      if (blob) {
+        setStatus("Adding to IndexedDB library…");
+        await importNativeAudioToLibrary({
+          blob,
+          title: vid.title,
+          artist: vid.channel,
+          thumbnailUrl: vid.thumbnail,
+          ext,
+        });
+        const mime = ext === "m4a" ? "audio/mp4" : "audio/mpeg";
+        const file = new File([blob], `${vid.title}.${ext}`, { type: mime });
+        const before = new Set(p.library.map((track) => track.id));
+        await p.addFiles([file]);
+        pendingArtwork.current = { previousIds: before, thumbnail: vid.thumbnail };
+
+        setStatus("Added to library");
+        setMessage(`"${vid.title}" added to your local library!`);
+      }
     } catch (err: unknown) {
       console.error("Save to library error:", err);
-      setDownloads((items) =>
-        items.map((item) =>
-          item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
-        ),
+      setStatus("Stream restricted by provider. Try direct device download or open link directly.");
+      setMessage(
+        "Stream restricted by provider. Try direct device download or open link directly.",
       );
-      setMessage("Connection dropped during the download. Try again.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -1012,61 +1148,15 @@ function MusicApp() {
             <Button
               variant="ghost"
               size="icon"
+              className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground shrink-0"
               title={`Options for ${t.title}`}
-              onClick={() => setMenu(menu === t.id ? null : t.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedMenuTrack(t);
+              }}
             >
-              <MoreHorizontal />
+              <MoreHorizontal className="h-5 w-5" />
             </Button>
-            {menu === t.id && (
-              <div className="row-menu">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    p.playTrack(
-                      t.id,
-                      tracks.map((x) => x.id),
-                    );
-                    setMenu(null);
-                  }}
-                >
-                  <Play className="mr-2 h-4 w-4" /> Play
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    p.enqueue(t.id);
-                    setMenu(null);
-                    setMessage("Added to play next");
-                  }}
-                >
-                  <ListMusic className="mr-2 h-4 w-4" /> Play next
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    p.toggleLike(t.id);
-                    setMenu(null);
-                  }}
-                >
-                  <Heart className={`mr-2 h-4 w-4 ${t.liked ? "filled-heart" : ""}`} />
-                  {t.liked ? "Remove from loved" : "Love song"}
-                </Button>
-                {playlists.map((x) => (
-                  <Button key={x.name} variant="ghost" onClick={() => addToPlaylist(t.id, x.name)}>
-                    Add to {x.name}
-                  </Button>
-                ))}
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setSelectedAlbum(t.album);
-                    go("album");
-                  }}
-                >
-                  Go to album
-                </Button>
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -1140,8 +1230,9 @@ function MusicApp() {
         hidden
         onChange={async (e) => {
           const f = e.target.files?.[0];
-          if (f && p.current) {
-            await p.setTrackArtwork(p.current.id, f);
+          const targetId = editingTrack?.id || p.current?.id;
+          if (f && targetId) {
+            await p.setTrackArtwork(targetId, f);
             setMessage("Song picture updated.");
           }
           e.target.value = "";
@@ -1237,7 +1328,7 @@ function MusicApp() {
                 key={s}
                 variant="ghost"
                 className={activeNav === s ? "selected" : ""}
-                onClick={() => go(s)}
+                onClick={() => handleNavClick(s)}
               >
                 <Icon />
                 {label}
@@ -1603,7 +1694,8 @@ function MusicApp() {
               )}
 
               <DiscoverSearch
-                initialQuery={youtubeQuery || query}
+                key={exploreRefreshKey}
+                initialQuery={youtubeQuery}
                 activeVideo={activeExploreVideo}
                 onCloseActiveVideo={() => setActiveExploreVideo(null)}
                 selectedArtist={selectedExploreArtist}
@@ -3027,33 +3119,191 @@ function MusicApp() {
         </div>
       )}
 
-      {editInfo && p.current && (
-        <div className="download-sheet-backdrop" onClick={() => setEditInfo(false)}>
+      {/* Dedicated Top-Layer Song Options Action Modal (Always visible on top of all UI) */}
+      {selectedMenuTrack && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md p-3 sm:p-4"
+          onClick={() => setSelectedMenuTrack(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-popover text-popover-foreground border border-border p-4 shadow-2xl backdrop-blur-2xl flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Song Preview Card */}
+            <div className="flex items-center gap-3 pb-3 border-b border-border">
+              <Art
+                track={selectedMenuTrack}
+                className="w-12 h-12 rounded-xl object-cover shrink-0 shadow-sm"
+              />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-foreground truncate">
+                  {selectedMenuTrack.title}
+                </h3>
+                <p className="text-xs text-muted-foreground truncate">
+                  {selectedMenuTrack.artist} · {selectedMenuTrack.album}
+                </p>
+                {selectedMenuTrack.duration ? (
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    {fmt(selectedMenuTrack.duration)}
+                  </span>
+                ) : null}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                onClick={() => setSelectedMenuTrack(null)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Prominent Action Buttons (EDIT & DELETE AT THE TOP AS REQUESTED!) */}
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 h-11 rounded-2xl bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800 font-bold text-xs gap-2"
+                onClick={() => {
+                  const t = selectedMenuTrack;
+                  setSelectedMenuTrack(null);
+                  setEditingTrack(t);
+                  setInfoDraft({ title: t.title, artist: t.artist, album: t.album });
+                  setEditInfo(true);
+                }}
+              >
+                <Pencil className="h-4 w-4" /> Edit Song
+              </Button>
+
+              <Button
+                variant="outline"
+                className="flex-1 h-11 rounded-2xl bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 font-bold text-xs gap-2"
+                onClick={() => {
+                  const id = selectedMenuTrack.id;
+                  const title = selectedMenuTrack.title;
+                  setSelectedMenuTrack(null);
+                  void p.deleteTrack(id);
+                  setMessage(`Deleted "${title}" from your library`);
+                }}
+              >
+                <Trash2 className="h-4 w-4" /> Delete Song
+              </Button>
+            </div>
+
+            {/* Standard Playback and Playlist Options */}
+            <div className="flex flex-col gap-1 pt-1 max-h-60 overflow-y-auto no-scrollbar">
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-xs font-semibold h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                onClick={() => {
+                  const id = selectedMenuTrack.id;
+                  setSelectedMenuTrack(null);
+                  p.playTrack(id);
+                }}
+              >
+                <Play className="mr-2.5 h-4 w-4 text-emerald-500 fill-emerald-500" /> Play Now
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-xs font-semibold h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                onClick={() => {
+                  const id = selectedMenuTrack.id;
+                  setSelectedMenuTrack(null);
+                  p.enqueue(id);
+                  setMessage("Added to play next in queue");
+                }}
+              >
+                <ListMusic className="mr-2.5 h-4 w-4 text-amber-500" /> Play Next
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-xs font-semibold h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                onClick={() => {
+                  const id = selectedMenuTrack.id;
+                  setSelectedMenuTrack(null);
+                  p.toggleLike(id);
+                }}
+              >
+                <Heart
+                  className={`mr-2.5 h-4 w-4 ${selectedMenuTrack.liked ? "filled-heart text-rose-500 fill-rose-500" : "text-rose-400"}`}
+                />
+                {selectedMenuTrack.liked ? "Remove from Loved" : "Love Song"}
+              </Button>
+
+              {playlists.map((x) => (
+                <Button
+                  key={x.name}
+                  variant="ghost"
+                  className="w-full justify-start text-xs font-medium h-8 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    const id = selectedMenuTrack.id;
+                    addToPlaylist(id, x.name);
+                    setSelectedMenuTrack(null);
+                  }}
+                >
+                  <Music2 className="mr-2.5 h-3.5 w-3.5" /> Add to {x.name}
+                </Button>
+              ))}
+
+              {selectedMenuTrack.album && (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-xs font-medium h-8 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    const albumName = selectedMenuTrack.album;
+                    setSelectedMenuTrack(null);
+                    setSelectedAlbum(albumName);
+                    go("album");
+                  }}
+                >
+                  <Disc3 className="mr-2.5 h-3.5 w-3.5" /> Go to album ({selectedMenuTrack.album})
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Song Details Dialog */}
+      {editInfo && (editingTrack || p.current) && (
+        <div
+          className="download-sheet-backdrop z-[9999]"
+          onClick={() => {
+            setEditInfo(false);
+            setEditingTrack(null);
+          }}
+        >
           <form
             className="download-sheet info-sheet"
             onClick={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
-              if (!p.current) return;
+              const target = editingTrack || p.current;
+              if (!target) return;
               void p
-                .updateTrackInfo(p.current.id, {
-                  title: infoDraft.title.trim() || p.current.title,
-                  artist: infoDraft.artist.trim() || p.current.artist,
-                  album: infoDraft.album.trim() || p.current.album,
+                .updateTrackInfo(target.id, {
+                  title: infoDraft.title.trim() || target.title,
+                  artist: infoDraft.artist.trim() || target.artist,
+                  album: infoDraft.album.trim() || target.album,
                 })
                 .then(() => {
                   setEditInfo(false);
+                  setEditingTrack(null);
                   setMessage("Song info saved");
                 });
             }}
           >
             <div className="download-sheet-header">
-              <h3>Song info</h3>
+              <h3>Edit Song Details</h3>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => setEditInfo(false)}
+                onClick={() => {
+                  setEditInfo(false);
+                  setEditingTrack(null);
+                }}
                 title="Close"
               >
                 <X />
@@ -3081,7 +3331,19 @@ function MusicApp() {
                   onChange={(e) => setInfoDraft({ ...infoDraft, album: e.target.value })}
                 />
               </label>
-              <Button type="submit">Save</Button>
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full text-xs"
+                  onClick={() => customArtInput.current?.click()}
+                >
+                  <ImagePlus className="mr-2 h-4 w-4" /> Change Custom Artwork
+                </Button>
+              </div>
+              <Button type="submit" className="w-full mt-2">
+                Save Changes
+              </Button>
             </div>
           </form>
         </div>
@@ -3124,6 +3386,32 @@ function MusicApp() {
                     {downloadModalVideo.duration ? `· ${downloadModalVideo.duration}` : ""}
                   </span>
                 </div>
+              </div>
+
+              {/* Dual-Engine Route Switcher (Cloud Server vs Direct Device) */}
+              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-black/5 dark:bg-white/5 border border-white/40 dark:border-white/10 text-xs font-semibold">
+                <button
+                  type="button"
+                  className={`flex-1 py-1.5 rounded-xl transition-all ${
+                    downloadRouteMode === "server" || downloadRouteMode === "auto"
+                      ? "bg-white dark:bg-zinc-800 text-foreground shadow-sm font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setDownloadRouteMode("server")}
+                >
+                  Cloud Download (Server)
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 py-1.5 rounded-xl transition-all ${
+                    downloadRouteMode === "native"
+                      ? "bg-white dark:bg-zinc-800 text-foreground shadow-sm font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setDownloadRouteMode("native")}
+                >
+                  Direct Device Download (Native)
+                </button>
               </div>
 
               {/* Format Switcher Tabs */}
@@ -3332,7 +3620,7 @@ function MusicApp() {
           <Button
             variant="ghost"
             key={s}
-            onClick={() => go(s)}
+            onClick={() => handleNavClick(s)}
             className={activeNav === s ? "active" : ""}
           >
             <Icon />

@@ -4020,7 +4020,7 @@ li::-webkit-scrollbar,
   height: 0 !important;
 }
 
-/* Normal White Screen Layout for Explorer */
+/* Normal Screen Layout for Explorer */
 .explore-white-screen {
   background-color: #ffffff;
   color: #0f172a;
@@ -4028,6 +4028,13 @@ li::-webkit-scrollbar,
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
   padding: 1.25rem;
+  overscroll-behavior-y: contain;
+}
+
+.dark .explore-white-screen {
+  background-color: rgba(24, 24, 27, 0.95);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 @media (min-width: 640px) {

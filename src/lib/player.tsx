@@ -38,10 +38,10 @@ export const EQ_PRESETS: Record<EqPreset, number[]> = {
   Electronic: [4.5, 3.5, 1.5, 0, -1.0, 1.0, 2.5, 3.5, 4.5, 3.5],
 };
 
-const DB_NAME = "spoiled-local-music";
-const DB_VERSION = 2;
+export const DB_NAME = "spoiled-local-music";
+export const DB_VERSION = 2;
 
-function openLibrary(): Promise<IDBDatabase> {
+export function openLibrary(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       return reject(new Error("indexedDB is not available"));
@@ -61,7 +61,7 @@ function openLibrary(): Promise<IDBDatabase> {
   });
 }
 
-async function saveTrackToIdb(track: Track, file: File, pictureBlob?: Blob) {
+export async function saveTrackToIdb(track: Track, file: File, pictureBlob?: Blob) {
   const db = await openLibrary();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction("tracks", "readwrite");
@@ -78,7 +78,7 @@ async function saveTrackToIdb(track: Track, file: File, pictureBlob?: Blob) {
   db.close();
 }
 
-interface StoredTrackRecord extends Omit<Track, "url" | "pictureUrl"> {
+export interface StoredTrackRecord extends Omit<Track, "url" | "pictureUrl"> {
   file: File;
   pictureBlob?: Blob;
 }
@@ -121,6 +121,7 @@ interface Ctx {
   removeFromQueue: (i: number) => void;
   moveInQueue: (from: number, to: number) => void;
   toggleLike: (id: string) => void;
+  deleteTrack: (id: string) => Promise<void>;
   exportBackup: () => Promise<string>;
   importBackup: (jsonStr: string) => Promise<boolean>;
   clearLibrary: () => Promise<void>;
@@ -638,6 +639,58 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const deleteTrack = async (id: string) => {
+    // If this track is currently active, stop playback
+    const currentActiveId = stateRef.current.queue[stateRef.current.index];
+    if (currentActiveId === id) {
+      decks.current.forEach((a) => {
+        try {
+          a.pause();
+        } catch {
+          /* ignore */
+        }
+      });
+      setPlaying(false);
+    }
+
+    // Clean up object URLs
+    setLibrary((tracks) => {
+      const match = tracks.find((t) => t.id === id);
+      if (match?.url) {
+        try {
+          URL.revokeObjectURL(match.url);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (match?.pictureUrl) {
+        try {
+          URL.revokeObjectURL(match.pictureUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+      return tracks.filter((t) => t.id !== id);
+    });
+
+    // Remove from active queue
+    setQueue((q) => q.filter((x) => x !== id));
+
+    // Delete from IndexedDB
+    try {
+      const db = await openLibrary();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("tracks", "readwrite");
+        tx.objectStore("tracks").delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (e) {
+      console.warn("Could not delete track from IndexedDB:", e);
+    }
+  };
+
   return (
     <PlayerCtx.Provider
       value={{
@@ -716,6 +769,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         exportBackup,
         importBackup,
         clearLibrary,
+        deleteTrack,
       }}
     >
       {children}

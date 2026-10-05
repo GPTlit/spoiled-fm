@@ -116,6 +116,7 @@ interface Ctx {
   setTrackArtwork: (id: string, pictureBlob: Blob) => Promise<void>;
   setShuffle: (v: boolean) => void;
   setRepeat: (v: boolean) => void;
+  setRepeatOne: (v: boolean) => void;
   enqueue: (id: string) => void;
   removeFromQueue: (i: number) => void;
   moveInQueue: (from: number, to: number) => void;
@@ -145,6 +146,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [mixMode, setMixMode] = useState<"crossfade" | "automix">("crossfade");
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
+  const repeatOne = useRef(false);
 
   // Equalizer State
   const [eqPreset, setEqPresetState] = useState<EqPreset>("Flat");
@@ -386,6 +388,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const transition =
         mixMode === "automix" ? Math.min(6, Math.max(1.5, a.duration * 0.06)) : crossfade;
       if (
+        !repeatOne.current &&
         !fading.current &&
         !a.paused &&
         a.duration &&
@@ -398,6 +401,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
 
     const onEnded = (e: Event) => {
+      if (e.target === decks.current[active.current] && repeatOne.current) {
+        const a = decks.current[active.current]!;
+        a.currentTime = 0;
+        void a.play().catch(() => {});
+        return;
+      }
       if (e.target === decks.current[active.current] && !fading.current) {
         goTo(stateRef.current.index + 1);
       }
@@ -671,6 +680,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setTrackArtwork,
         setShuffle,
         setRepeat,
+        setRepeatOne: (v) => {
+          repeatOne.current = v;
+        },
         enqueue: (id) => setQueue((q) => [...q.slice(0, index + 1), id, ...q.slice(index + 1)]),
         removeFromQueue: (i) => {
           setQueue((q) => q.filter((_, j) => j !== i));

@@ -20,6 +20,9 @@ import {
   Play,
   Plus,
   Repeat2,
+  Repeat1,
+  ImagePlus,
+  Menu,
   Search,
   Send,
   Settings2,
@@ -62,7 +65,6 @@ import {
   type EqPreset,
 } from "@/lib/player";
 import spoiledLiquidLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
-import auroraBanner from "@/assets/images/aurora_glass_banner_1790935692854.jpg";
 import featured from "@/assets/better-days.jpg";
 import afterHours from "@/assets/after-hours.jpg";
 import dawn from "@/assets/dawn-fm.jpg";
@@ -180,6 +182,15 @@ function MusicApp() {
   const [selectedPlaylist, setSelectedPlaylist] = useState("Chill Vibes");
   const [menu, setMenu] = useState<string | null>(null);
   const [theme, setTheme] = useState("Liquid Glass (Light)");
+  const [plays, setPlays] = useState<Record<string, number>>({});
+  const [playMode, setPlayMode] = useState<"loop-all" | "loop-one" | "shuffle">("loop-all");
+  const [playerStyle, setPlayerStyle] = useState("Default");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [recentAccounts, setRecentAccounts] = useState<string[]>([]);
+  const customArtInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
@@ -366,10 +377,102 @@ function MusicApp() {
       </Button>
     </div>
   ) : (
-    <Button variant="outline" onClick={signIn} disabled={accountBusy}>
-      Sign in with Google
-    </Button>
+    <div className="account-controls">
+      <Button variant="outline" onClick={signIn} disabled={accountBusy}>
+        Sign in with Google
+      </Button>
+      <Button variant="ghost" onClick={() => setAuthOpen(true)} disabled={accountBusy}>
+        Use email
+      </Button>
+    </div>
   );
+
+  // Play counts, play mode, look and player style are kept on this device.
+  useEffect(() => {
+    try {
+      setPlays(JSON.parse(localStorage.getItem("spoiled-plays") || "{}"));
+      const mode = localStorage.getItem("spoiled-play-mode");
+      if (mode === "loop-all" || mode === "loop-one" || mode === "shuffle") setPlayMode(mode);
+      const t = localStorage.getItem("spoiled-theme");
+      if (t) setTheme(t);
+      const ps = localStorage.getItem("spoiled-player-style");
+      if (ps) setPlayerStyle(ps);
+      setRecentAccounts(JSON.parse(localStorage.getItem("spoiled-accounts") || "[]"));
+    } catch {
+      // ignore corrupt prefs
+    }
+  }, []);
+  useEffect(() => {
+    const id = p.current?.id;
+    if (!id) return;
+    setPlays((prev) => {
+      const next = { ...prev, [id]: (prev[id] ?? 0) + 1 };
+      localStorage.setItem("spoiled-plays", JSON.stringify(next));
+      return next;
+    });
+  }, [p.current?.id]);
+  useEffect(() => {
+    p.setShuffle(playMode === "shuffle");
+    p.setRepeat(playMode !== "shuffle");
+    p.setRepeatOne(playMode === "loop-one");
+    localStorage.setItem("spoiled-play-mode", playMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playMode]);
+  useEffect(() => {
+    const email = account?.email;
+    if (email) {
+      setRecentAccounts((prev) => {
+        const next = [email, ...prev.filter((e) => e !== email)].slice(0, 5);
+        localStorage.setItem("spoiled-accounts", JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [account?.email]);
+
+  const emailAuth = async () => {
+    if (!authEmail.trim() || authPassword.length < 6) {
+      setMessage("Enter your email and a password of at least 6 characters.");
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        setMessage(
+          data.session ? "Account created." : "Check your inbox to confirm your email, then sign in.",
+        );
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) throw error;
+        setMessage("Signed in.");
+      }
+      setAuthOpen(false);
+      setAuthPassword("");
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Sign-in failed.");
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const switchAccount = async (email?: string) => {
+    await supabase.auth.signOut();
+    setAccount(null);
+    setAuthEmail(email ?? "");
+    setAuthMode("signin");
+    setAuthOpen(true);
+  };
+
+  const cyclePlayMode = () =>
+    setPlayMode((m) => (m === "loop-all" ? "loop-one" : m === "loop-one" ? "shuffle" : "loop-all"));
 
   // Local storage persistence for playlists & lyrics
   useEffect(() => {
@@ -455,10 +558,13 @@ function MusicApp() {
       tracks = tracks.filter((t) =>
         playlists.find((x) => x.name === selectedPlaylist)?.ids.includes(t.id),
       );
+    if (sort === "Recently Added") tracks.reverse();
+    if (sort === "Name") tracks.sort((a, b) => a.title.localeCompare(b.title));
+    if (sort === "Most Played") tracks.sort((a, b) => (plays[b.id] ?? 0) - (plays[a.id] ?? 0));
     if (sort === "Title A–Z") tracks.sort((a, b) => a.title.localeCompare(b.title));
     if (sort === "Artist A–Z") tracks.sort((a, b) => a.artist.localeCompare(b.artist));
     return tracks;
-  }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort]);
+  }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort, plays]);
 
   const albums = useMemo(() => [...new Set(p.library.map((t) => t.album))], [p.library]);
   const artists = useMemo(() => [...new Set(p.library.map((t) => t.artist))], [p.library]);
@@ -566,6 +672,39 @@ function MusicApp() {
     setDownloadModalOpen(true);
   };
 
+  // Fallback layer: runs the original download request first, then public mirrors, with retries.
+  const fetchMediaWithFallback = async (
+    id: string,
+    type: "audio" | "video",
+    quality: string,
+    title: string,
+    onStatus: (status: string) => void,
+  ): Promise<Response | null> => {
+    const primary = `/api/video/download?id=${encodeURIComponent(id)}&type=${type}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(title)}`;
+    try {
+      const res = await fetch(primary);
+      if (res.ok) return res;
+    } catch {
+      // continue to fallback
+    }
+    const waits = [0, 4000, 10000, 20000];
+    for (let attempt = 0; attempt < waits.length; attempt++) {
+      if (waits[attempt]) {
+        onStatus(`Retrying (${attempt + 1}/${waits.length})`);
+        await new Promise((r) => setTimeout(r, waits[attempt]));
+      } else onStatus("Trying another source");
+      try {
+        const res = await fetch(
+          `/api/video/fallback?id=${encodeURIComponent(id)}&type=${type}&title=${encodeURIComponent(title)}`,
+        );
+        if (res.ok) return res;
+      } catch {
+        // next attempt
+      }
+    }
+    return null;
+  };
+
   const handleDownloadFile = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
@@ -581,22 +720,22 @@ function MusicApp() {
     );
 
     try {
-      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=${downloadType}&quality=${encodeURIComponent(selectedQuality)}&title=${encodeURIComponent(downloadModalVideo.title)}`;
-      const res = await fetch(url);
+      const vid = downloadModalVideo;
+      const setStatus = (status: string) =>
+        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
+      const res = await fetchMediaWithFallback(vid.id, downloadType, selectedQuality, vid.title, setStatus);
 
-      if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
-        setMessage("Download unavailable. You can add audio files you own to your library.");
+      if (!res) {
+        setStatus("Sources busy — tap Download again");
+        setMessage("All download sources are busy right now. Try again in a minute.");
         return;
       }
 
       setDownloadProgressText("Transferring file to your downloads...");
       const blob = await res.blob();
-      const ext = downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4";
+      const ext =
+        res.headers.get("x-spoiled-ext") ||
+        (downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4");
       const sanitized =
         downloadModalVideo.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
       const filename = `${sanitized}.${ext}`;
@@ -641,20 +780,20 @@ function MusicApp() {
     setDownloadProgressText("Importing audio into your library...");
 
     try {
-      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
-        setMessage("Audio isn't available for import. Add an audio file you own instead.");
+      const vid = downloadModalVideo;
+      const setStatus = (status: string) =>
+        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
+      const res = await fetchMediaWithFallback(vid.id, "audio", "320", vid.title, setStatus);
+      if (!res) {
+        setStatus("Sources busy — tap Add again");
+        setMessage("All download sources are busy right now. Try again in a minute.");
         return;
       }
 
       const blob = await res.blob();
-      const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
+      const ext = res.headers.get("x-spoiled-ext") || "mp3";
+      const mime = blob.type && blob.type.startsWith("audio") ? blob.type : ext === "mp3" ? "audio/mpeg" : `audio/${ext === "m4a" ? "mp4" : ext}`;
+      const file = new File([blob], `${downloadModalVideo.title}.${ext}`, { type: mime });
       const before = new Set(p.library.map((track) => track.id));
       await p.addFiles([file]);
       // The imported track is committed on the next render.
@@ -673,7 +812,7 @@ function MusicApp() {
           item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
         ),
       );
-      setMessage("Audio couldn't be imported. Add an audio file you own instead.");
+      setMessage("Connection dropped during the download. Try again.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -926,11 +1065,13 @@ function MusicApp() {
     ? previous
     : screen;
 
-  const isDark = theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
+  const isVelvet = theme.startsWith("Velvet");
+  const isDark =
+    isVelvet || theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
 
   return (
     <div
-      className={`app-shell ${isDark ? "dark" : ""} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
+      className={`app-shell ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
     >
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
@@ -938,6 +1079,61 @@ function MusicApp() {
         <div className="orb orb-3" />
       </div>
 
+      <input
+        ref={customArtInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (f && p.current) {
+            await p.setTrackArtwork(p.current.id, f);
+            setMessage("Song picture updated.");
+          }
+          e.target.value = "";
+        }}
+      />
+      {authOpen && (
+        <div className="auth-sheet-backdrop" onClick={() => setAuthOpen(false)}>
+          <form
+            className="auth-sheet"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void emailAuth();
+            }}
+          >
+            <h2>{authMode === "signin" ? "Sign in" : "Create account"}</h2>
+            <input
+              type="email"
+              placeholder="Email"
+              autoComplete="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+            />
+            <Button type="submit" disabled={accountBusy}>
+              {authMode === "signin" ? "Sign in" : "Create account"}
+            </Button>
+            <Button type="button" variant="outline" onClick={signIn} disabled={accountBusy}>
+              Continue with Google
+            </Button>
+            <button
+              type="button"
+              className="auth-switch"
+              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+            >
+              {authMode === "signin" ? "New here? Create an account" : "Have an account? Sign in"}
+            </button>
+          </form>
+        </div>
+      )}
       <input
         ref={files}
         type="file"
@@ -1035,10 +1231,10 @@ function MusicApp() {
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
-                  title="Settings"
+                  title="Menu"
                   onClick={() => go("settings")}
                 >
-                  <Settings2 />
+                  <Menu />
                 </Button>
               </div>
 
@@ -1079,28 +1275,6 @@ function MusicApp() {
                   <h2>Living Soundscapes</h2>
                   <p>Move your cursor to sculpt reactive fluid sound waves over liquid glass.</p>
                 </div>
-              </div>
-
-              <div
-                className="feature"
-                style={{
-                  backgroundImage: `linear-gradient(0deg, var(--feature-shade), transparent 65%), url(${auroraBanner})`,
-                }}
-              >
-                <div className="feature-content">
-                  <span className="feature-kicker">FLUID SOUNDSCAPES</span>
-                  <h2>Better Days</h2>
-                  <p>A crystal space to discover and immerse.</p>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="feature-play-btn"
-                  title="Explore music"
-                  onClick={() => go("explore")}
-                >
-                  <Compass />
-                </Button>
               </div>
 
               <div className="quick-grid">
@@ -1222,9 +1396,10 @@ function MusicApp() {
                       value={sort}
                       onChange={(e) => setSort(e.target.value)}
                     >
-                      <option>Recently Added</option>
-                      <option>Title A–Z</option>
-                      <option>Artist A–Z</option>
+                      <option value="Recently Added">Date added</option>
+                      <option value="Name">Name</option>
+                      <option value="Most Played">Most played</option>
+                      <option value="Artist A–Z">Artist A–Z</option>
                     </select>
                   </div>
                   {rows(list)}
@@ -1436,10 +1611,10 @@ function MusicApp() {
                   variant="ghost"
                   size="icon"
                   className="glass-icon-btn"
-                  title="Settings"
+                  title="Menu"
                   onClick={() => go("settings")}
                 >
-                  <Settings2 />
+                  <Menu />
                 </Button>
               </header>
 
@@ -1464,13 +1639,35 @@ function MusicApp() {
                   </span>
                 </div>
                 {account ? (
-                  <Button variant="outline" onClick={signOut} disabled={accountBusy}>
-                    Sign out
-                  </Button>
+                  <div className="account-controls">
+                    <Button variant="outline" onClick={() => switchAccount()} disabled={accountBusy}>
+                      Switch account
+                    </Button>
+                    <Button variant="outline" onClick={signOut} disabled={accountBusy}>
+                      Sign out
+                    </Button>
+                  </div>
                 ) : (
-                  <Button onClick={signIn} disabled={accountBusy}>
-                    Sign in with Google
-                  </Button>
+                  <div className="account-controls">
+                    <Button onClick={signIn} disabled={accountBusy}>
+                      Sign in with Google
+                    </Button>
+                    <Button variant="outline" onClick={() => setAuthOpen(true)} disabled={accountBusy}>
+                      Email & password
+                    </Button>
+                  </div>
+                )}
+                {recentAccounts.filter((e) => e !== account?.email).length > 0 && (
+                  <div className="recent-accounts">
+                    <small>Switch to</small>
+                    {recentAccounts
+                      .filter((e) => e !== account?.email)
+                      .map((e) => (
+                        <button key={e} onClick={() => switchAccount(e)}>
+                          {e}
+                        </button>
+                      ))}
+                  </div>
                 )}
               </div>
 
@@ -2260,11 +2457,45 @@ function MusicApp() {
                   <select
                     aria-label="Appearance"
                     value={theme}
-                    onChange={(e) => setTheme(e.target.value)}
+                    onChange={(e) => {
+                      setTheme(e.target.value);
+                      localStorage.setItem("spoiled-theme", e.target.value);
+                    }}
                   >
                     <option>Liquid Glass (Light)</option>
                     <option>Liquid Obsidian (Dark)</option>
+                    <option>Velvet Night (Deep)</option>
                   </select>
+                </div>
+                <div className="settings-row">
+                  <Disc3 />
+                  <span>Player style</span>
+                  <select
+                    aria-label="Player style"
+                    value={playerStyle}
+                    onChange={(e) => {
+                      setPlayerStyle(e.target.value);
+                      localStorage.setItem("spoiled-player-style", e.target.value);
+                    }}
+                  >
+                    <option>Default</option>
+                    <option>Modern Vinyl</option>
+                    <option>Classic Vinyl</option>
+                    <option>CD</option>
+                    <option>Cassette</option>
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <ImagePlus />
+                  <span>Picture for current song</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!p.current}
+                    onClick={() => customArtInput.current?.click()}
+                  >
+                    Choose from gallery
+                  </Button>
                 </div>
               </div>
               <div className="settings-footer">
@@ -2468,11 +2699,23 @@ function MusicApp() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Shuffle"
-                      onClick={() => p.setShuffle(!p.shuffle)}
-                      className={p.shuffle ? "control-active" : ""}
+                      title={
+                        playMode === "loop-all"
+                          ? "Loop playlist"
+                          : playMode === "loop-one"
+                            ? "Loop one song"
+                            : "Shuffle"
+                      }
+                      onClick={cyclePlayMode}
+                      className="control-active"
                     >
-                      <Shuffle />
+                      {playMode === "loop-all" ? (
+                        <Repeat2 />
+                      ) : playMode === "loop-one" ? (
+                        <Repeat1 />
+                      ) : (
+                        <Shuffle />
+                      )}
                     </Button>
                     <Button variant="ghost" size="icon" title="Previous" onClick={p.prev}>
                       <SkipBack />
@@ -2491,11 +2734,10 @@ function MusicApp() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      title="Repeat"
-                      onClick={() => p.setRepeat(!p.repeat)}
-                      className={p.repeat ? "control-active" : ""}
+                      title="Song picture"
+                      onClick={() => customArtInput.current?.click()}
                     >
-                      <Repeat2 />
+                      <ImagePlus />
                     </Button>
                   </div>
 

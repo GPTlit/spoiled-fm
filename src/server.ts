@@ -131,6 +131,20 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/video/fallback" && request.method === "GET") {
+      const id = url.searchParams.get("id") || "";
+      const type = url.searchParams.get("type") === "audio" ? "audio" : "video";
+      const title =
+        (url.searchParams.get("title") || "download").replace(/[^\w\s.-]/gi, "").trim() ||
+        "spoiled-media";
+      if (!/^[\w-]{10,12}$/.test(id)) {
+        return new Response(JSON.stringify({ error: "Invalid video ID" }), { status: 400 });
+      }
+      const { fallbackDownload } = await import("./lib/download-fallback.server");
+      const res = await fallbackDownload(id, type, title);
+      return res ?? new Response(JSON.stringify({ error: "busy" }), { status: 503 });
+    }
+
     if (url.pathname === "/api/video/download" && request.method === "GET") {
       const id = url.searchParams.get("id");
       const type = url.searchParams.get("type") || "video"; // "video" | "audio"

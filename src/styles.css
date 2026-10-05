@@ -3720,24 +3720,24 @@ body,
   background: radial-gradient(120% 80% at 10% 0%, oklch(0.3 0.12 340 / 0.55), transparent 60%),
     radial-gradient(90% 70% at 100% 100%, oklch(0.32 0.1 200 / 0.45), transparent 60%), var(--background);
 }
-.player-style-modern-vinyl .player-screen .player-art img,
-.player-style-classic-vinyl .player-screen .player-art img,
-.player-style-cd .player-screen .player-art img {
+.player-style-modern-vinyl .player-screen .large-cover .art img,
+.player-style-classic-vinyl .player-screen .large-cover .art img,
+.player-style-cd .player-screen .large-cover .art img {
   border-radius: 50%;
   animation: spoiled-spin 9s linear infinite;
 }
-.player-style-classic-vinyl .player-screen .player-art img {
+.player-style-classic-vinyl .player-screen .large-cover .art img {
   box-shadow: 0 0 0 14px oklch(0.15 0 0), 0 0 0 16px oklch(0.3 0 0), 0 30px 60px -20px oklch(0 0 0 / 0.6);
   filter: sepia(0.25);
 }
-.player-style-modern-vinyl .player-screen .player-art img {
+.player-style-modern-vinyl .player-screen .large-cover .art img {
   box-shadow: 0 0 0 10px oklch(0.1 0 0), 0 30px 60px -20px oklch(0 0 0 / 0.6);
 }
-.player-style-cd .player-screen .player-art img {
+.player-style-cd .player-screen .large-cover .art img {
   mask: radial-gradient(circle, transparent 9%, #000 9.5%);
   box-shadow: 0 0 0 2px oklch(0.9 0.02 250 / 0.6);
 }
-.player-style-cassette .player-screen .player-art img {
+.player-style-cassette .player-screen .large-cover .art img {
   border-radius: 14px;
   border: 10px solid oklch(0.25 0.02 60);
   aspect-ratio: 16 / 10;
@@ -3745,7 +3745,7 @@ body,
 }
 @keyframes spoiled-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .player-screen .player-art img { animation: none !important; }
+  .player-screen .large-cover .art img { animation: none !important; }
 }
 .auth-sheet-backdrop {
   position: fixed; inset: 0; z-index: 80; display: grid; place-items: center;
@@ -3765,3 +3765,6 @@ body,
 .account-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .recent-accounts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; }
 .recent-accounts button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); }
+.player-style-modern-vinyl .large-cover .art,
+.player-style-classic-vinyl .large-cover .art,
+.player-style-cd .large-cover .art { border-radius: 50%; overflow: visible; background: none; }

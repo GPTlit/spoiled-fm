@@ -74,6 +74,14 @@ import night from "@/assets/night.jpg";
 import sunflower from "@/assets/sunflower.jpg";
 import Threads from "@/components/Threads";
 import { parseLrc, findCurrentLrcIndex, type LrcLine } from "@/lib/lyrics";
+import { RadioGlobe } from "@/components/RadioGlobe";
+import { HomeFeed } from "@/components/HomeFeed";
+import { DiscoverSearch } from "@/components/DiscoverSearch";
+import { StudioVideoPlayer } from "@/components/StudioVideoPlayer";
+import { CameraPhotoEditor } from "@/components/CameraPhotoEditor";
+import { ProfileAdmin } from "@/components/ProfileAdmin";
+import { getAppTitle, getAppLogo } from "@/lib/user-preferences";
+import { Globe, Camera as CameraIcon, Palette } from "lucide-react";
 
 type Screen =
   | "home"
@@ -89,7 +97,10 @@ type Screen =
   | "queue"
   | "album"
   | "playlist"
-  | "watch";
+  | "watch"
+  | "globe"
+  | "camera"
+  | "studio";
 
 type Tab = "Songs" | "Albums" | "Artists" | "Playlists";
 
@@ -235,6 +246,18 @@ function MusicApp() {
   }
 
   const [searchScope, setSearchScope] = useState<"all" | "online" | "local">("all");
+  const [customAppTitle, setCustomAppTitle] = useState(getAppTitle());
+  const [customLogo, setCustomLogo] = useState<string | null>(getAppLogo());
+  const [useStudioPlayer, setUseStudioPlayer] = useState(true);
+
+  useEffect(() => {
+    const handleStorage = () => {
+      setCustomAppTitle(getAppTitle());
+      setCustomLogo(getAppLogo());
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
   const [onlineVideos, setOnlineVideos] = useState<OnlineVideo[]>([]);
   const [onlineLoading, setOnlineLoading] = useState(false);
   const [activeWatchVideo, setActiveWatchVideo] = useState<OnlineVideo | null>(null);
@@ -444,7 +467,9 @@ function MusicApp() {
         });
         if (error) throw error;
         setMessage(
-          data.session ? "Account created." : "Check your inbox to confirm your email, then sign in.",
+          data.session
+            ? "Account created."
+            : "Check your inbox to confirm your email, then sign in.",
         );
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -623,7 +648,7 @@ function MusicApp() {
     setActiveWatchVideo(video);
     setIsPipMode(pip);
     if (!pip) {
-      go("watch");
+      go(useStudioPlayer ? "studio" : "watch");
     }
   };
 
@@ -722,8 +747,16 @@ function MusicApp() {
     try {
       const vid = downloadModalVideo;
       const setStatus = (status: string) =>
-        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
-      const res = await fetchMediaWithFallback(vid.id, downloadType, selectedQuality, vid.title, setStatus);
+        setDownloads((items) =>
+          items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
+        );
+      const res = await fetchMediaWithFallback(
+        vid.id,
+        downloadType,
+        selectedQuality,
+        vid.title,
+        setStatus,
+      );
 
       if (!res) {
         setStatus("Sources busy — tap Download again");
@@ -782,7 +815,9 @@ function MusicApp() {
     try {
       const vid = downloadModalVideo;
       const setStatus = (status: string) =>
-        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
+        setDownloads((items) =>
+          items.map((item) => (item.id === vid.id ? { ...item, status } : item)),
+        );
       const res = await fetchMediaWithFallback(vid.id, "audio", "320", vid.title, setStatus);
       if (!res) {
         setStatus("Sources busy — tap Add again");
@@ -792,7 +827,12 @@ function MusicApp() {
 
       const blob = await res.blob();
       const ext = res.headers.get("x-spoiled-ext") || "mp3";
-      const mime = blob.type && blob.type.startsWith("audio") ? blob.type : ext === "mp3" ? "audio/mpeg" : `audio/${ext === "m4a" ? "mp4" : ext}`;
+      const mime =
+        blob.type && blob.type.startsWith("audio")
+          ? blob.type
+          : ext === "mp3"
+            ? "audio/mpeg"
+            : `audio/${ext === "m4a" ? "mp4" : ext}`;
       const file = new File([blob], `${downloadModalVideo.title}.${ext}`, { type: mime });
       const before = new Set(p.library.map((track) => track.id));
       await p.addFiles([file]);
@@ -1071,7 +1111,7 @@ function MusicApp() {
 
   return (
     <div
-      className={`app-shell ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
+      className={`app-shell ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current && !["now", "lyrics", "queue", "studio"].includes(screen) ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue", "studio"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
     >
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
@@ -1199,6 +1239,30 @@ function MusicApp() {
             </Button>
             <Button
               variant="ghost"
+              className={activeNav === "studio" ? "selected" : ""}
+              onClick={() => go("studio")}
+            >
+              <Film className="mr-2 h-4 w-4" />
+              Video Player
+            </Button>
+            <Button
+              variant="ghost"
+              className={activeNav === "globe" ? "selected" : ""}
+              onClick={() => go("globe")}
+            >
+              <Globe className="mr-2 h-4 w-4" />
+              Radio Globe
+            </Button>
+            <Button
+              variant="ghost"
+              className={activeNav === "camera" ? "selected" : ""}
+              onClick={() => go("camera")}
+            >
+              <CameraIcon className="mr-2 h-4 w-4" />
+              Camera & Studio
+            </Button>
+            <Button
+              variant="ghost"
               className={activeNav === "liked" ? "selected" : ""}
               onClick={() => go("liked")}
             >
@@ -1224,18 +1288,38 @@ function MusicApp() {
             <>
               <div className="topline">
                 <div className="topline-brand">
-                  <img src={spoiledLiquidLogo} alt="" className="topline-icon" />
-                  <span>SPOILED</span>
+                  <img src={customLogo || spoiledLiquidLogo} alt="" className="topline-icon" />
+                  <span>{customAppTitle}</span>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="glass-icon-btn"
-                  title="Menu"
-                  onClick={() => go("settings")}
-                >
-                  <Menu />
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="glass-icon-btn"
+                    title="Camera & Photo Studio"
+                    onClick={() => go("camera")}
+                  >
+                    <CameraIcon className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="glass-icon-btn"
+                    title="3D Radio Globe"
+                    onClick={() => go("globe")}
+                  >
+                    <Globe className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="glass-icon-btn"
+                    title="Menu"
+                    onClick={() => go("settings")}
+                  >
+                    <Menu />
+                  </Button>
+                </div>
               </div>
 
               <header className="home-head">
@@ -1265,17 +1349,6 @@ function MusicApp() {
                 Search your music…
                 <Mic className="search-mic" />
               </Button>
-
-              {/* Interactive Threads WebGL Component Banner */}
-              <div className="threads-hero-card">
-                <div className="threads-canvas-wrapper">
-                  <Threads amplitude={1.25} distance={0.02} enableMouseInteraction />
-                </div>
-                <div className="threads-hero-content">
-                  <h2>Living Soundscapes</h2>
-                  <p>Move your cursor to sculpt reactive fluid sound waves over liquid glass.</p>
-                </div>
-              </div>
 
               <div className="quick-grid">
                 <Button variant="ghost" onClick={() => go("liked")}>
@@ -1351,6 +1424,25 @@ function MusicApp() {
                   </Button>
                 </div>
               )}
+
+              {/* Rich Home Discovery Feed & Radio Globe */}
+              <div className="mt-8">
+                <HomeFeed
+                  onSelectGenre={(genre) => {
+                    setQuery(genre);
+                    go("explore");
+                  }}
+                  onPlayStation={(name) => {
+                    setMessage(`Streaming: ${name}`);
+                    go("globe");
+                  }}
+                  onOpenRadioGlobe={() => go("globe")}
+                  onSelectArtist={(artist) => {
+                    setQuery(artist);
+                    go("explore");
+                  }}
+                />
+              </div>
             </>
           )}
 
@@ -1474,42 +1566,13 @@ function MusicApp() {
               <header className="page-head">
                 <div>
                   <p className="eyebrow">BEYOND YOUR LIBRARY</p>
-                  <h1>Explore</h1>
+                  <h1>Explore & Discover</h1>
                 </div>
                 <Compass className="h-6 w-6 text-muted-foreground" />
               </header>
 
-              <div className="video-search-bar">
-                <div className="video-search-input-wrap">
-                  <input
-                    aria-label="Search videos"
-                    placeholder="Search songs, artists or videos…"
-                    value={youtubeQuery}
-                    onChange={(e) => setYoutubeQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void searchOnlineVideos(youtubeQuery);
-                    }}
-                  />
-                </div>
-                <Button
-                  className="video-search-btn"
-                  onClick={() => void searchOnlineVideos(youtubeQuery)}
-                  disabled={onlineLoading}
-                >
-                  <Search className="h-4 w-4" /> Search
-                </Button>
-              </div>
-              <div className="section-title">
-                <h2>Videos</h2>
-              </div>
-              {onlineLoading && <p className="muted-note">Loading videos…</p>}
-              {!onlineLoading && onlineVideos.length === 0 && (
-                <p className="muted-note">
-                  No videos available right now. Search for something else.
-                </p>
-              )}
               {downloads.length > 0 && (
-                <div className="download-activity">
+                <div className="download-activity mb-4">
                   <h2>Downloads</h2>
                   {downloads.map((item) => (
                     <div key={item.id}>
@@ -1519,83 +1582,12 @@ function MusicApp() {
                   ))}
                 </div>
               )}
-              {
-                <div>
-                  {/* Online Video Grid if searched */}
-                  {onlineVideos.length > 0 && (
-                    <div>
-                      <div className="section-title">
-                        <h2 className="flex items-center gap-2">Videos ({onlineVideos.length})</h2>
-                        {onlineLoading && (
-                          <span className="text-xs text-muted-foreground animate-pulse">
-                            Searching…
-                          </span>
-                        )}
-                      </div>
-                      <div className="video-grid">
-                        {onlineVideos.map((vid) => (
-                          <div key={vid.id} className="video-card" onClick={() => watchVideo(vid)}>
-                            <div className="video-thumb-wrap">
-                              <img src={vid.thumbnail} alt={vid.title} />
-                              <div className="video-play-overlay">
-                                <div className="video-play-circle">
-                                  <Play className="h-6 w-6 fill-current ml-0.5" />
-                                </div>
-                              </div>
-                              {vid.duration && (
-                                <span className="video-duration-pill">{vid.duration}</span>
-                              )}
-                            </div>
-                            <div className="video-details">
-                              <strong title={vid.title}>{vid.title}</strong>
-                              <span className="video-channel">
-                                <Youtube className="h-3.5 w-3.5 text-red-500" />
-                                {vid.channel} {vid.views ? `· ${vid.views}` : ""}
-                              </span>
-                              <div className="video-card-actions">
-                                <button
-                                  className="watch-btn"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    watchVideo(vid);
-                                  }}
-                                >
-                                  <Play className="h-3.5 w-3.5 fill-current" /> Watch Video
-                                </button>
-                                <div className="flex items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openDownloadModal(vid, "video");
-                                    }}
-                                    title="Download Video or Audio"
-                                  >
-                                    <Download className="h-3.5 w-3.5 mr-1 text-emerald-500" />{" "}
-                                    Download
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      watchVideo(vid, true);
-                                    }}
-                                    title="Watch in Mini Player"
-                                  >
-                                    <Minimize2 className="h-3.5 w-3.5 mr-1" /> PiP
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              }
+
+              <DiscoverSearch
+                initialQuery={youtubeQuery || query}
+                onSelectVideo={(vid) => watchVideo(vid)}
+                onOpenDownloadModal={(vid, type) => openDownloadModal(vid, type)}
+              />
             </>
           )}
 
@@ -1640,7 +1632,11 @@ function MusicApp() {
                 </div>
                 {account ? (
                   <div className="account-controls">
-                    <Button variant="outline" onClick={() => switchAccount()} disabled={accountBusy}>
+                    <Button
+                      variant="outline"
+                      onClick={() => switchAccount()}
+                      disabled={accountBusy}
+                    >
                       Switch account
                     </Button>
                     <Button variant="outline" onClick={signOut} disabled={accountBusy}>
@@ -1652,7 +1648,11 @@ function MusicApp() {
                     <Button onClick={signIn} disabled={accountBusy}>
                       Sign in with Google
                     </Button>
-                    <Button variant="outline" onClick={() => setAuthOpen(true)} disabled={accountBusy}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setAuthOpen(true)}
+                      disabled={accountBusy}
+                    >
                       Email & password
                     </Button>
                   </div>
@@ -1755,6 +1755,14 @@ function MusicApp() {
                   ))}
                 </div>
               </div>
+
+              {/* Profile Admin Panel & Native Integrations */}
+              <ProfileAdmin
+                tracks={p.library}
+                onSetTrackArtwork={(id, blob) => p.setTrackArtwork(id, blob)}
+                onPlayTrack={(id) => p.playTrack(id)}
+                onOpenVideo={(vid) => watchVideo(vid)}
+              />
 
               {/* Data & Backup Management */}
               <div className="settings-group">
@@ -2090,6 +2098,19 @@ function MusicApp() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => setUseStudioPlayer(!useStudioPlayer)}
+                        className={`text-xs gap-1 ${
+                          useStudioPlayer
+                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                            : ""
+                        }`}
+                      >
+                        <Palette className="h-3.5 w-3.5" />
+                        <span>{useStudioPlayer ? "Studio Pro Suite" : "Open Studio Pro"}</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         className="download-cta-btn"
                         onClick={() => openDownloadModal(activeWatchVideo, "video")}
                       >
@@ -2101,14 +2122,29 @@ function MusicApp() {
                   <div className="watch-screen-grid">
                     {/* Main Video & Meta Column */}
                     <div className="watch-main-column">
-                      <div className="watch-video-wrapper">
-                        <iframe
-                          src={getYoutubeEmbedUrl(activeWatchVideo.id)}
-                          title={activeWatchVideo.title}
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                          allowFullScreen
-                        />
-                      </div>
+                      {useStudioPlayer ? (
+                        <div className="mb-4">
+                          <StudioVideoPlayer
+                            videoId={activeWatchVideo.id}
+                            title={activeWatchVideo.title}
+                            channel={activeWatchVideo.channel}
+                            thumbnail={activeWatchVideo.thumbnail}
+                            onClose={() => setUseStudioPlayer(false)}
+                            onOpenDownloadModal={(type) =>
+                              openDownloadModal(activeWatchVideo, type)
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <div className="watch-video-wrapper">
+                          <iframe
+                            src={getYoutubeEmbedUrl(activeWatchVideo.id)}
+                            title={activeWatchVideo.title}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                          />
+                        </div>
+                      )}
 
                       <div className="watch-meta-card">
                         <div className="watch-title-row">
@@ -2379,13 +2415,85 @@ function MusicApp() {
               </header>
               <div className="settings-brand">
                 <div className="liquid-icon-frame">
-                  <img src={spoiledLiquidLogo} alt="SPOILED" />
+                  <img src={customLogo || spoiledLiquidLogo} alt="SPOILED" />
                 </div>
                 <div>
-                  <strong>SPOILED</strong>
-                  <small>Fluid Glass Personal Audio</small>
+                  <strong>{customAppTitle}</strong>
+                  <small>Fluid Glass Personal Media Suite</small>
                 </div>
                 <ChevronRight />
+              </div>
+
+              {/* Studio & Tools Suite in Menu Drawer */}
+              <div className="settings-group">
+                <div className="settings-row">
+                  <Sparkles className="h-4 w-4 text-emerald-500" />
+                  <span className="font-semibold">Media Suite & Features</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  className="settings-row text-left justify-between"
+                  onClick={() => go("studio")}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Film className="h-4 w-4 text-indigo-400" />
+                    <div>
+                      <strong className="block text-sm">Video Player & Studio</strong>
+                      <small className="text-xs text-muted-foreground">
+                        Color grading, gestures, frame fitting
+                      </small>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="settings-row text-left justify-between"
+                  onClick={() => go("globe")}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Globe className="h-4 w-4 text-sky-400" />
+                    <div>
+                      <strong className="block text-sm">3D Radio Globe</strong>
+                      <small className="text-xs text-muted-foreground">
+                        Live world radio stations & streams
+                      </small>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="settings-row text-left justify-between"
+                  onClick={() => go("camera")}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <CameraIcon className="h-4 w-4 text-pink-400" />
+                    <div>
+                      <strong className="block text-sm">Camera & Photo Studio</strong>
+                      <small className="text-xs text-muted-foreground">
+                        Retouch, crop, filters, drawing, stickers
+                      </small>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="settings-row text-left justify-between"
+                  onClick={() => go("profile")}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Sliders className="h-4 w-4 text-amber-400" />
+                    <div>
+                      <strong className="block text-sm">Profile & Admin Panel</strong>
+                      <small className="text-xs text-muted-foreground">
+                        Custom branding, logo, EQ & history
+                      </small>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Button>
               </div>
               <div className="settings-group settings-account">
                 <div className="settings-row">
@@ -2765,6 +2873,57 @@ function MusicApp() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {screen === "globe" && (
+            <div className="radio-globe-screen space-y-4">
+              <header className="page-head">
+                <Button variant="ghost" size="icon" className="glass-icon-btn" onClick={back}>
+                  <ArrowLeft />
+                </Button>
+                <div className="flex-1 text-center">
+                  <span className="eyebrow">WORLD BROADCAST SATELLITES</span>
+                  <h1 className="text-lg font-bold">3D Earth Radio Globe</h1>
+                </div>
+                <div style={{ width: 44 }} />
+              </header>
+              <RadioGlobe
+                onTuneInStation={(st) => {
+                  setMessage(`Tuned to ${st.name} [${st.country}]`);
+                }}
+              />
+            </div>
+          )}
+
+          {screen === "camera" && (
+            <div className="camera-screen space-y-4">
+              <header className="page-head">
+                <Button variant="ghost" size="icon" className="glass-icon-btn" onClick={back}>
+                  <ArrowLeft />
+                </Button>
+                <div className="flex-1 text-center">
+                  <span className="eyebrow">CREATIVE PHOTO STUDIO</span>
+                  <h1 className="text-lg font-bold">Camera & Gallery Editor</h1>
+                </div>
+                <div style={{ width: 44 }} />
+              </header>
+              <CameraPhotoEditor onClose={back} />
+            </div>
+          )}
+
+          {screen === "studio" && (
+            <div className="studio-screen w-full h-full -mx-4 -mt-4 sm:mx-0 sm:mt-0">
+              <StudioVideoPlayer
+                videoId={activeWatchVideo?.id || null}
+                title={activeWatchVideo?.title || ""}
+                channel={activeWatchVideo?.channel || ""}
+                thumbnail={activeWatchVideo?.thumbnail || ""}
+                onClose={back}
+                onOpenDownloadModal={(type) =>
+                  activeWatchVideo && openDownloadModal(activeWatchVideo, type)
+                }
+              />
             </div>
           )}
         </main>

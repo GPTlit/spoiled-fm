@@ -12,6 +12,7 @@
 - [x] Add a Capacitor Android shell, SPOILED icon and splash, with network and notification permission declarations; native media notification, camera and device-wide music permissions remain unimplemented pending native integration and device testing.
 
 ## Phased update (Oct 2026)
+
 - [x] Phase 1: download fallback, email sign-in + account switching, banner removed, sorting, play modes, solid nav, three-line menu, Velvet Night look, player styles, custom song picture
 - [ ] Phase 2: home feed, radio globe, compact Explore rows, filters, voice search, topic chips, channels, link player, monthly watch history
 - [ ] Phase 3: full video player + adjustment panel

@@ -180,6 +180,15 @@ function MusicApp() {
   const [selectedPlaylist, setSelectedPlaylist] = useState("Chill Vibes");
   const [menu, setMenu] = useState<string | null>(null);
   const [theme, setTheme] = useState("Liquid Glass (Light)");
+  const [plays, setPlays] = useState<Record<string, number>>({});
+  const [playMode, setPlayMode] = useState<"loop-all" | "loop-one" | "shuffle">("loop-all");
+  const [playerStyle, setPlayerStyle] = useState("Default");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [recentAccounts, setRecentAccounts] = useState<string[]>([]);
+  const customArtInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
@@ -455,10 +464,13 @@ function MusicApp() {
       tracks = tracks.filter((t) =>
         playlists.find((x) => x.name === selectedPlaylist)?.ids.includes(t.id),
       );
+    if (sort === "Recently Added") tracks.reverse();
+    if (sort === "Name") tracks.sort((a, b) => a.title.localeCompare(b.title));
+    if (sort === "Most Played") tracks.sort((a, b) => (plays[b.id] ?? 0) - (plays[a.id] ?? 0));
     if (sort === "Title A–Z") tracks.sort((a, b) => a.title.localeCompare(b.title));
     if (sort === "Artist A–Z") tracks.sort((a, b) => a.artist.localeCompare(b.artist));
     return tracks;
-  }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort]);
+  }, [p.library, screen, query, selectedAlbum, selectedPlaylist, playlists, sort, plays]);
 
   const albums = useMemo(() => [...new Set(p.library.map((t) => t.album))], [p.library]);
   const artists = useMemo(() => [...new Set(p.library.map((t) => t.artist))], [p.library]);
@@ -566,6 +578,39 @@ function MusicApp() {
     setDownloadModalOpen(true);
   };
 
+  // Fallback layer: runs the original download request first, then public mirrors, with retries.
+  const fetchMediaWithFallback = async (
+    id: string,
+    type: "audio" | "video",
+    quality: string,
+    title: string,
+    onStatus: (status: string) => void,
+  ): Promise<Response | null> => {
+    const primary = `/api/video/download?id=${encodeURIComponent(id)}&type=${type}&quality=${encodeURIComponent(quality)}&title=${encodeURIComponent(title)}`;
+    try {
+      const res = await fetch(primary);
+      if (res.ok) return res;
+    } catch {
+      // continue to fallback
+    }
+    const waits = [0, 4000, 10000, 20000];
+    for (let attempt = 0; attempt < waits.length; attempt++) {
+      if (waits[attempt]) {
+        onStatus(`Retrying (${attempt + 1}/${waits.length})`);
+        await new Promise((r) => setTimeout(r, waits[attempt]));
+      } else onStatus("Trying another source");
+      try {
+        const res = await fetch(
+          `/api/video/fallback?id=${encodeURIComponent(id)}&type=${type}&title=${encodeURIComponent(title)}`,
+        );
+        if (res.ok) return res;
+      } catch {
+        // next attempt
+      }
+    }
+    return null;
+  };
+
   const handleDownloadFile = async () => {
     if (!downloadModalVideo || downloadInProgress) return;
     setDownloadInProgress(true);
@@ -581,22 +626,22 @@ function MusicApp() {
     );
 
     try {
-      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=${downloadType}&quality=${encodeURIComponent(selectedQuality)}&title=${encodeURIComponent(downloadModalVideo.title)}`;
-      const res = await fetch(url);
+      const vid = downloadModalVideo;
+      const setStatus = (status: string) =>
+        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
+      const res = await fetchMediaWithFallback(vid.id, downloadType, selectedQuality, vid.title, setStatus);
 
-      if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
-        setMessage("Download unavailable. You can add audio files you own to your library.");
+      if (!res) {
+        setStatus("Sources busy — tap Download again");
+        setMessage("All download sources are busy right now. Try again in a minute.");
         return;
       }
 
       setDownloadProgressText("Transferring file to your downloads...");
       const blob = await res.blob();
-      const ext = downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4";
+      const ext =
+        res.headers.get("x-spoiled-ext") ||
+        (downloadType === "audio" ? (selectedQuality === "128" ? "m4a" : "mp3") : "mp4");
       const sanitized =
         downloadModalVideo.title.replace(/[^\w\s.-]/gi, "").trim() || "spoiled-media";
       const filename = `${sanitized}.${ext}`;
@@ -641,20 +686,20 @@ function MusicApp() {
     setDownloadProgressText("Importing audio into your library...");
 
     try {
-      const url = `/api/video/download?id=${encodeURIComponent(downloadModalVideo.id)}&type=audio&quality=320&title=${encodeURIComponent(downloadModalVideo.title)}`;
-      const res = await fetch(url);
-      if (!res.ok) {
-        setDownloads((items) =>
-          items.map((item) =>
-            item.id === downloadModalVideo.id ? { ...item, status: "Unavailable" } : item,
-          ),
-        );
-        setMessage("Audio isn't available for import. Add an audio file you own instead.");
+      const vid = downloadModalVideo;
+      const setStatus = (status: string) =>
+        setDownloads((items) => items.map((item) => (item.id === vid.id ? { ...item, status } : item)));
+      const res = await fetchMediaWithFallback(vid.id, "audio", "320", vid.title, setStatus);
+      if (!res) {
+        setStatus("Sources busy — tap Add again");
+        setMessage("All download sources are busy right now. Try again in a minute.");
         return;
       }
 
       const blob = await res.blob();
-      const file = new File([blob], `${downloadModalVideo.title}.mp3`, { type: "audio/mpeg" });
+      const ext = res.headers.get("x-spoiled-ext") || "mp3";
+      const mime = blob.type && blob.type.startsWith("audio") ? blob.type : ext === "mp3" ? "audio/mpeg" : `audio/${ext === "m4a" ? "mp4" : ext}`;
+      const file = new File([blob], `${downloadModalVideo.title}.${ext}`, { type: mime });
       const before = new Set(p.library.map((track) => track.id));
       await p.addFiles([file]);
       // The imported track is committed on the next render.
@@ -673,7 +718,7 @@ function MusicApp() {
           item.id === downloadModalVideo.id ? { ...item, status: "Failed" } : item,
         ),
       );
-      setMessage("Audio couldn't be imported. Add an audio file you own instead.");
+      setMessage("Connection dropped during the download. Try again.");
     } finally {
       setDownloadInProgress(false);
       setDownloadProgressText("");
@@ -1081,28 +1126,6 @@ function MusicApp() {
                 </div>
               </div>
 
-              <div
-                className="feature"
-                style={{
-                  backgroundImage: `linear-gradient(0deg, var(--feature-shade), transparent 65%), url(${auroraBanner})`,
-                }}
-              >
-                <div className="feature-content">
-                  <span className="feature-kicker">FLUID SOUNDSCAPES</span>
-                  <h2>Better Days</h2>
-                  <p>A crystal space to discover and immerse.</p>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="feature-play-btn"
-                  title="Explore music"
-                  onClick={() => go("explore")}
-                >
-                  <Compass />
-                </Button>
-              </div>
-
               <div className="quick-grid">
                 <Button variant="ghost" onClick={() => go("liked")}>
                   <span className="quick-icon-badge">
@@ -1222,9 +1245,10 @@ function MusicApp() {
                       value={sort}
                       onChange={(e) => setSort(e.target.value)}
                     >
-                      <option>Recently Added</option>
-                      <option>Title A–Z</option>
-                      <option>Artist A–Z</option>
+                      <option value="Recently Added">Date added</option>
+                      <option value="Name">Name</option>
+                      <option value="Most Played">Most played</option>
+                      <option value="Artist A–Z">Artist A–Z</option>
                     </select>
                   </div>
                   {rows(list)}

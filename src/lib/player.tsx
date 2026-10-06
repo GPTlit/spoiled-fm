@@ -752,7 +752,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1, 0)),
         seek: (t) => {
           const a = decks.current[active.current];
-          if (a) a.currentTime = t;
+          if (a && isFinite(t)) {
+            const maxD = isFinite(a.duration) && a.duration > 0 ? a.duration : t;
+            const target = Math.max(0, Math.min(t, maxD));
+            try {
+              a.currentTime = target;
+            } catch {
+              /* ignore */
+            }
+            setTime(target);
+            if (
+              typeof navigator !== "undefined" &&
+              "mediaSession" in navigator &&
+              "setPositionState" in navigator.mediaSession &&
+              isFinite(a.duration) &&
+              a.duration > 0
+            ) {
+              try {
+                navigator.mediaSession.setPositionState({
+                  duration: Math.max(0, a.duration),
+                  playbackRate: 1,
+                  position: Math.min(target, a.duration),
+                });
+              } catch {
+                /* ignore */
+              }
+            }
+          }
         },
         setVolume: (v) => {
           setVolumeS(v);

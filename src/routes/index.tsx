@@ -155,10 +155,11 @@ export const Route = createFileRoute("/")({
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
   const currentAppLogo = getAppLogo();
   const brandLogo = currentAppLogo || spoiledLiquidLogo;
-  const imgSrc = track?.pictureUrl || (track?.album ? coverFor(track.album) : brandLogo);
+  // Use track's embedded/custom artwork, or the official app logo / admin custom logo as default
+  const imgSrc = track?.pictureUrl || brandLogo;
   return (
     <div className={`art ${className}`}>
-      <img src={imgSrc} alt={track ? `${track.album || track.title} artwork` : "SPOILED"} />
+      <img src={imgSrc} alt={track ? `${track.title} artwork` : "SPOILED"} />
     </div>
   );
 }
@@ -224,6 +225,31 @@ function MusicApp() {
   const [lyrics, setLyrics] = useState<Record<string, string>>({});
   const [lyricDraft, setLyricDraft] = useState("");
   const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
+  const scrubValRef = useRef<number | null>(null);
+
+  const commitSeek = (explicitTime?: number) => {
+    const t = explicitTime ?? scrubValRef.current ?? scrubbingTime;
+    if (t !== null && isFinite(t)) {
+      p.seek(t);
+    }
+    scrubValRef.current = null;
+    setScrubbingTime(null);
+  };
+
+  useEffect(() => {
+    if (scrubbingTime === null) return;
+    const handleRelease = () => {
+      commitSeek();
+    };
+    window.addEventListener("pointerup", handleRelease);
+    window.addEventListener("touchend", handleRelease);
+    window.addEventListener("mouseup", handleRelease);
+    return () => {
+      window.removeEventListener("pointerup", handleRelease);
+      window.removeEventListener("touchend", handleRelease);
+      window.removeEventListener("mouseup", handleRelease);
+    };
+  }, [scrubbingTime]);
 
   // AI Curator State
   const [aiText, setAiText] = useState("");
@@ -3092,32 +3118,35 @@ function MusicApp() {
                       step="0.1"
                       value={scrubbingTime !== null ? scrubbingTime : p.time}
                       onPointerDown={(e) => {
-                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                        const val = +e.currentTarget.value;
+                        scrubValRef.current = val;
+                        setScrubbingTime(val);
                       }}
                       onTouchStart={(e) => {
-                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                        const val = +e.currentTarget.value;
+                        scrubValRef.current = val;
+                        setScrubbingTime(val);
                       }}
                       onInput={(e) => {
-                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                        const val = +e.currentTarget.value;
+                        scrubValRef.current = val;
+                        setScrubbingTime(val);
                       }}
                       onChange={(e) => {
-                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                        const val = +e.currentTarget.value;
+                        commitSeek(val);
                       }}
                       onPointerUp={(e) => {
-                        const val = +(e.target as HTMLInputElement).value;
-                        p.seek(val);
-                        setScrubbingTime(null);
+                        const val = +e.currentTarget.value;
+                        commitSeek(val);
                       }}
-                      onTouchEnd={(e) => {
-                        const val = +(e.target as HTMLInputElement).value;
-                        p.seek(val);
-                        setScrubbingTime(null);
+                      onTouchEnd={() => {
+                        commitSeek();
                       }}
                       onKeyUp={(e) => {
                         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                          const val = +(e.target as HTMLInputElement).value;
-                          p.seek(val);
-                          setScrubbingTime(null);
+                          const val = +e.currentTarget.value;
+                          commitSeek(val);
                         }
                       }}
                     />

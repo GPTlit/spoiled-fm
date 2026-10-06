@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { getApiUrl } from "@/lib/api-url";
+const API_URL = getApiUrl();
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -480,14 +482,17 @@ function MusicApp() {
         const { data, error } = await supabase.auth.signUp({
           email: authEmail.trim(),
           password: authPassword,
-          options: { emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
-        setMessage(
-          data.session
-            ? "Account created."
-            : "Check your inbox to confirm your email, then sign in.",
-        );
+        if (!data.session) {
+          // Already registered (or no session returned): sign straight in.
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: authEmail.trim(),
+            password: authPassword,
+          });
+          if (signInError) throw signInError;
+        }
+        setMessage("Account ready — you're signed in.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: authEmail.trim(),
@@ -657,7 +662,7 @@ function MusicApp() {
     }
     setOnlineLoading(true);
     try {
-      const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(queryStr)}`);
+      const res = await fetch(`${API_URL}/api/youtube/search?q=${encodeURIComponent(queryStr)}`);
       const data = (await res.json()) as { videos?: OnlineVideo[] };
       setOnlineVideos(data.videos || []);
     } catch (e) {
@@ -703,7 +708,7 @@ function MusicApp() {
     const q = `${artist} ${cleanTitle} songs`.trim() || activeWatchVideo.title;
 
     fetch(
-      `/api/video/related?q=${encodeURIComponent(q)}&id=${encodeURIComponent(activeWatchVideo.id)}`,
+      `${API_URL}/api/video/related?q=${encodeURIComponent(q)}&id=${encodeURIComponent(activeWatchVideo.id)}`,
     )
       .then((res) => res.json())
       .then((data: { videos?: OnlineVideo[] }) => {
@@ -1037,7 +1042,7 @@ function MusicApp() {
     setAiLoading(true);
 
     try {
-      const res = await fetch("/api/assistant", {
+      const res = await fetch(`${API_URL}/api/assistant`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1388,7 +1393,7 @@ function MusicApp() {
           </div>
         </aside>
 
-        <main className="main-screen">
+        <main className={`main-screen screen-${screen}`}>
           {screen === "home" && (
             <>
               <div className="topline">

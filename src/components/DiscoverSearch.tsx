@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getApiUrl } from "@/lib/api-url";
+const API_URL = getApiUrl();
 import {
   Search,
   Mic,
@@ -177,7 +179,7 @@ export function DiscoverSearch({
     setFrequentTerms(getFrequentSearchTerms());
 
     try {
-      const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(clean)}`);
+      const res = await fetch(`${API_URL}/api/youtube/search?q=${encodeURIComponent(clean)}`);
       if (res.ok) {
         const data = (await res.json()) as { videos?: VideoResult[]; results?: VideoResult[] };
         const found = data.videos || data.results;
@@ -285,7 +287,7 @@ export function DiscoverSearch({
               ];
         discoveryPromptIdx.current++;
 
-        const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(prompt)}`);
+        const res = await fetch(`${API_URL}/api/youtube/search?q=${encodeURIComponent(prompt)}`);
         if (res.ok) {
           const data = (await res.json()) as { videos?: VideoResult[]; results?: VideoResult[] };
           const found = data.videos || data.results;
@@ -321,6 +323,62 @@ export function DiscoverSearch({
     },
     [activeTopic],
   );
+
+  // Infinite continuous scrolling: append more videos when the end comes into view
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const loadingMoreRef = useRef(false);
+  const morePage = useRef(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const searching = results.length > 0;
+    const base = searching
+      ? query.trim()
+      : activeTopic !== "All"
+        ? `${activeTopic} music`
+        : DISCOVERY_SEARCH_PROMPTS[discoveryPromptIdx.current++ % DISCOVERY_SEARCH_PROMPTS.length];
+    const suffixes = ["", "official", "live", "new", "playlist", "mix", "remix", "full", "best", "2026"];
+    const term = `${base} ${suffixes[morePage.current++ % suffixes.length]}`.trim();
+    let fresh: VideoResult[] = [];
+    try {
+      const res = await fetch(`${API_URL}/api/youtube/search?q=${encodeURIComponent(term)}`);
+      if (res.ok) {
+        const data = (await res.json()) as { videos?: VideoResult[]; results?: VideoResult[] };
+        fresh = data.videos || data.results || [];
+      }
+    } catch {
+      // ignore
+    }
+    if (fresh.length === 0) fresh = getFreshRecommendations(searching ? "All" : activeTopic, 8);
+    const append = <T extends VideoResult>(prev: T[], extra: T[]) => {
+      const seen = new Set(prev.map((v) => v.id));
+      const unique = extra.filter((v) => !seen.has(v.id));
+      // Never dead-end: if everything was a duplicate, still add a fresh shuffled batch
+      return [...prev, ...(unique.length ? unique : extra.map((v, i) => ({ ...v, id: `${v.id}~${morePage.current}-${i}` })))];
+    };
+    if (searching) setResults((prev) => append(prev, fresh));
+    else
+      setRecommendations((prev) =>
+        append(prev, fresh.map((v) => ({ ...v, category: "Trending", tag: "More for you" }) as CuratedRecommendation)),
+      );
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, [results.length, query, activeTopic]);
+
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore();
+      },
+      { rootMargin: "600px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore, currentVideo, activeChannel]);
 
   // Pull-to-refresh event handlers
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
@@ -547,7 +605,7 @@ export function DiscoverSearch({
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md backdrop-blur-md transition-all ${
               pullDistance >= 55 || isPullRefreshing
                 ? "bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
-                : "bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-muted-foreground"
+                : "bg-muted border border-border text-muted-foreground"
             }`}
           >
             {isPullRefreshing ? (
@@ -574,17 +632,17 @@ export function DiscoverSearch({
       )}
 
       {/* 1. SEARCH INPUT BAR (ALWAYS AT THE VERY TOP) */}
-      <div className="sticky -top-4 sm:-top-6 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md pt-3 pb-3 border-b border-slate-100 dark:border-zinc-800 -mx-4 sm:-mx-6 px-4 sm:px-6 mb-4">
+      <div className="sticky -top-4 sm:-top-6 z-30 bg-background/95 backdrop-blur-md pt-3 pb-3 border-b border-border -mx-4 sm:-mx-6 px-4 sm:px-6 mb-4">
         <div className="relative flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Search songs, artists, music videos, or paste YouTube link…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && triggerSearch(query)}
-              className="w-full h-11 pl-10 pr-20 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-xs"
+              className="w-full h-11 pl-10 pr-20 rounded-2xl bg-card border border-border text-sm font-medium text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all shadow-xs"
             />
             {query && (
               <button
@@ -592,7 +650,7 @@ export function DiscoverSearch({
                   setQuery("");
                   setResults([]);
                 }}
-                className="absolute right-10 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-foreground"
+                className="absolute right-10 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
                 title="Clear query"
               >
                 <X className="h-3.5 w-3.5" />
@@ -602,7 +660,7 @@ export function DiscoverSearch({
               <button
                 onClick={handleVoiceToggle}
                 className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-colors ${
-                  isListening ? "bg-red-500 text-white" : "text-slate-400 hover:text-foreground"
+                  isListening ? "bg-red-500 text-white" : "text-muted-foreground hover:text-foreground"
                 }`}
                 title={isListening ? "Listening… click to stop" : "Voice search"}
               >
@@ -618,7 +676,7 @@ export function DiscoverSearch({
             className={`h-11 w-11 rounded-2xl shrink-0 border ${
               filtersOpen
                 ? "bg-primary/10 text-primary border-primary"
-                : "border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 text-foreground"
+                : "border-border hover:bg-accent text-foreground"
             }`}
             title="Search filters"
           >
@@ -636,8 +694,8 @@ export function DiscoverSearch({
 
         {/* Search Filters Drawer Panel */}
         {filtersOpen && (
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm mt-3 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-zinc-800">
+          <div className="p-4 rounded-2xl bg-muted border border-border shadow-sm mt-3 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
               <h3 className="text-sm font-bold flex items-center gap-1.5 text-foreground">
                 <SlidersHorizontal className="h-4 w-4 text-primary" />
                 <span>Search Filters</span>
@@ -717,7 +775,7 @@ export function DiscoverSearch({
               className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
                 activeTopic === topic
                   ? "bg-primary text-primary-foreground shadow-xs font-bold"
-                  : "bg-slate-100 dark:bg-zinc-800/80 text-foreground/80 hover:bg-slate-200 dark:hover:bg-zinc-700"
+                  : "bg-muted/80 text-foreground/80 hover:bg-accent"
               }`}
             >
               {topic}
@@ -730,7 +788,7 @@ export function DiscoverSearch({
       {currentVideo && (
         <div
           ref={videoContainerRef}
-          className="explore-normal-video-box mb-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-zinc-800 bg-black shadow-lg"
+          className="explore-normal-video-box explore-video-page"
         >
           {/* Video Display Window */}
           <div className="relative w-full aspect-video bg-black overflow-hidden flex items-center justify-center">
@@ -821,7 +879,7 @@ export function DiscoverSearch({
           </div>
 
           {/* Video Title & Actions */}
-          <div className="p-3.5 bg-white dark:bg-zinc-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="p-3.5 bg-card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="text-sm sm:text-base font-bold text-foreground tracking-tight truncate">
                 {currentVideo.title}
@@ -848,7 +906,7 @@ export function DiscoverSearch({
                     size="sm"
                     variant="outline"
                     onClick={() => onOpenDownloadModal(currentVideo, "audio")}
-                    className="h-8 px-3 text-xs font-semibold rounded-xl border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                    className="h-8 px-3 text-xs font-semibold rounded-xl border-border hover:bg-accent"
                   >
                     <Download className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Audio
                   </Button>
@@ -869,13 +927,13 @@ export function DiscoverSearch({
       {/* 3. ARTIST CHANNEL PROFILE VIEW */}
       {activeArtistProfile && (
         <div className="artist-profile-suite space-y-4 mb-6">
-          <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900 p-4 sm:p-6 shadow-xs">
+          <div className="relative rounded-2xl overflow-hidden border border-border bg-muted p-4 sm:p-6 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={closeArtistProfile}
-                className="text-xs font-semibold gap-1.5 rounded-xl border-slate-300 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800"
+                className="text-xs font-semibold gap-1.5 rounded-xl border-border hover:bg-accent"
               >
                 <ArrowLeft className="h-4 w-4" /> Back to Search
               </Button>
@@ -920,7 +978,7 @@ export function DiscoverSearch({
                 <div
                   key={item.id}
                   onClick={() => handlePlayVideo(item)}
-                  className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="flex items-center justify-between p-2 rounded-xl bg-card border border-border hover:border-emerald-500 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <img
@@ -978,15 +1036,15 @@ export function DiscoverSearch({
             </span>
           </div>
 
-          <div className="space-y-2">
+          <div className="discover-grid">
             {filteredResults.map((item) => (
               <div
                 key={item.id}
                 onClick={() => handlePlayVideo(item)}
-                className="group flex items-center justify-between p-2.5 rounded-2xl bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 transition-all cursor-pointer shadow-xs"
+                className="discover-card group flex flex-col p-2 gap-2 rounded-2xl bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs"
               >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="relative w-16 h-11 shrink-0 rounded-xl overflow-hidden bg-black shadow-xs">
+                <div className="flex flex-col gap-2 min-w-0">
+                  <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black shadow-xs">
                     <img
                       src={item.thumbnail}
                       alt={item.title}
@@ -1004,7 +1062,7 @@ export function DiscoverSearch({
                   </div>
 
                   <div className="min-w-0 flex-1 pr-2">
-                    <strong className="block text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                    <strong className="block text-xs font-bold text-foreground line-clamp-2 group-hover:text-primary transition-colors">
                       {item.title}
                     </strong>
                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground truncate mt-0.5">
@@ -1028,7 +1086,7 @@ export function DiscoverSearch({
                 </div>
 
                 <div
-                  className="flex items-center gap-1.5 shrink-0"
+                  className="flex items-center gap-1.5 justify-end"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
@@ -1042,7 +1100,7 @@ export function DiscoverSearch({
                   {onOpenDownloadModal && (
                     <button
                       onClick={() => onOpenDownloadModal(item, "audio")}
-                      className="h-8 w-8 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
+                      className="h-8 w-8 rounded-full hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
                       title="Download audio"
                     >
                       <Download className="h-3.5 w-3.5" />
@@ -1054,7 +1112,7 @@ export function DiscoverSearch({
           </div>
 
           {/* 5. RECOMMENDATIONS AFTER SEARCH */}
-          <div className="pt-6 mt-6 border-t border-slate-200 dark:border-zinc-800 space-y-3">
+          <div className="pt-6 mt-6 border-t border-border space-y-3">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-500" />
@@ -1073,15 +1131,15 @@ export function DiscoverSearch({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="discover-grid">
               {searchRecommendations.map((item) => (
                 <div
                   key={`rec-${item.id}`}
                   onClick={() => handlePlayVideo(item)}
-                  className="group flex items-center justify-between p-2 rounded-2xl bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 transition-all cursor-pointer shadow-xs hover:border-primary/50"
+                  className="discover-card group flex flex-col p-2 gap-2 rounded-2xl bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs hover:border-primary/50"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div className="relative w-16 h-11 shrink-0 rounded-xl overflow-hidden bg-black shadow-xs">
+                  <div className="flex flex-col gap-2 min-w-0">
+                    <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black shadow-xs">
                       <img
                         src={item.thumbnail}
                         alt={item.title}
@@ -1099,7 +1157,7 @@ export function DiscoverSearch({
                     </div>
 
                     <div className="min-w-0 flex-1 pr-1">
-                      <strong className="block text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                      <strong className="block text-xs font-bold text-foreground line-clamp-2 group-hover:text-primary transition-colors">
                         {item.title}
                       </strong>
                       <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate mt-0.5">
@@ -1115,7 +1173,7 @@ export function DiscoverSearch({
                   </div>
 
                   <div
-                    className="flex items-center gap-1 shrink-0"
+                    className="flex items-center gap-1 justify-end"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -1128,7 +1186,7 @@ export function DiscoverSearch({
                     {onOpenDownloadModal && (
                       <button
                         onClick={() => onOpenDownloadModal(item, "audio")}
-                        className="h-7 w-7 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800 text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
+                        className="h-7 w-7 rounded-full hover:bg-accent text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
                         title="Download audio"
                       >
                         <Download className="h-3.5 w-3.5" />
@@ -1154,7 +1212,7 @@ export function DiscoverSearch({
               <div className="flex items-center gap-2">
                 <Flame className="h-4 w-4 text-amber-500 fill-amber-500" />
                 <h3 className="text-sm font-bold text-foreground">Recommended For You</h3>
-                <span className="text-[11px] font-semibold text-muted-foreground bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+                <span className="text-[11px] font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                   {activeTopic === "All" ? "Trending" : activeTopic}
                 </span>
               </div>
@@ -1170,12 +1228,12 @@ export function DiscoverSearch({
             </div>
 
             {/* Grid of Recommendation Video Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div className="discover-grid">
               {recommendations.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => handlePlayVideo(item)}
-                  className="group relative flex flex-col rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-primary/50 overflow-hidden shadow-xs hover:shadow-md transition-all cursor-pointer"
+                  className="group relative flex flex-col rounded-2xl bg-card border border-border hover:border-primary/50 overflow-hidden shadow-xs hover:shadow-md transition-all cursor-pointer"
                 >
                   {/* Thumbnail with duration badge & play button */}
                   <div className="relative aspect-video w-full bg-black overflow-hidden">
@@ -1217,7 +1275,7 @@ export function DiscoverSearch({
 
                     {/* Action Buttons: Play Now & Downloads */}
                     <div
-                      className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-zinc-800/80"
+                      className="discover-actions flex flex-wrap items-center justify-between gap-1 pt-2 border-t border-border/80"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -1231,7 +1289,7 @@ export function DiscoverSearch({
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => onOpenDownloadModal(item, "audio")}
-                            className="h-7 px-2 rounded-lg bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-muted-foreground hover:text-foreground text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                            className="h-7 px-2 rounded-lg bg-muted hover:bg-accent text-muted-foreground hover:text-foreground text-[11px] font-semibold flex items-center gap-1 transition-colors"
                             title="Download audio"
                           >
                             <Download className="h-3 w-3 text-emerald-500" /> Audio
@@ -1252,7 +1310,7 @@ export function DiscoverSearch({
             </div>
           </div>
           {/* Direct Link Pasting */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
+          <div className="p-4 rounded-2xl bg-muted border border-border">
             <span className="text-xs font-bold text-foreground block mb-1">
               Paste Any Video or YouTube Link
             </span>
@@ -1266,7 +1324,7 @@ export function DiscoverSearch({
                 value={directLinkInput}
                 onChange={(e) => setDirectLinkInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handlePlayDirectLink()}
-                className="flex-1 h-9 px-3 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="flex-1 h-9 px-3 rounded-xl bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <Button
                 size="sm"
@@ -1290,7 +1348,7 @@ export function DiscoverSearch({
                   <button
                     key={name}
                     onClick={() => openArtistProfile(name)}
-                    className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-foreground font-semibold text-xs shadow-xs transition-colors"
+                    className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-card hover:bg-accent border border-border text-foreground font-semibold text-xs shadow-xs transition-colors"
                   >
                     {profile?.cover && (
                       <img
@@ -1321,13 +1379,22 @@ export function DiscoverSearch({
                       setQuery(term);
                       void triggerSearch(term);
                     }}
-                    className="px-3 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-xs font-medium text-foreground transition-colors"
+                    className="px-3 py-1 rounded-full bg-muted hover:bg-accent text-xs font-medium text-foreground transition-colors"
                   >
                     {term}
                   </button>
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+      {!currentVideo && !activeChannel && (
+        <div ref={loadMoreRef} className="discover-load-more" aria-live="polite">
+          {loadingMore ? (
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          ) : (
+            <span>Loading more videos…</span>
           )}
         </div>
       )}

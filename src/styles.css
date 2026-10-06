@@ -4057,7 +4057,7 @@ li::-webkit-scrollbar,
 .explore-video-page {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 300;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -4090,4 +4090,9 @@ li::-webkit-scrollbar,
   .discover-actions > :first-child {
     display: inline-flex;
   }
+}
+
+body:has(.explore-video-page) .bottom-nav,
+body:has(.explore-video-page) .mini-player {
+  display: none !important;
 }

@@ -5,6 +5,8 @@ import tailwindPostcss from "@tailwindcss/postcss";
 import path from "path";
 
 export default defineConfig({
+  root: path.resolve(__dirname, "capacitor"),
+  publicDir: path.resolve(__dirname, "public"),
   plugins: [react()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   css: { postcss: { plugins: [tailwindPostcss()] } },
@@ -12,5 +14,8 @@ export default defineConfig({
     "process.env": {},
     "import.meta.env.VITE_NATIVE": JSON.stringify("1"),
   },
-  build: { outDir: "dist-capacitor", emptyOutDir: true },
+  build: {
+    outDir: path.resolve(__dirname, "dist-capacitor"),
+    emptyOutDir: true,
+  },
 });

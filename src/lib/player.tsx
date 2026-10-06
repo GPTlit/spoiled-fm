@@ -8,6 +8,11 @@ import {
   type ReactNode,
 } from "react";
 import { extractAudioMetadata } from "./metadata";
+import {
+  updateNativePlayback,
+  stopNativePlayback,
+  listenToNativeMediaCommands,
+} from "./native-mediasession";
 
 export interface Track {
   id: string;
@@ -102,6 +107,11 @@ interface Ctx {
   eqGains: number[];
   setEqPreset: (preset: EqPreset) => void;
   setEqGain: (bandIndex: number, gain: number) => void;
+  resetEqToDefault: () => void;
+  saveCurrentSongEq: () => void;
+  stemMode: "normal" | "vocals-only" | "beats-only";
+  setStemMode: (mode: "normal" | "vocals-only" | "beats-only") => void;
+  exportStemTrack: (track: Track, mode: "vocals-only" | "beats-only") => Promise<Track>;
   addFiles: (files: FileList | File[]) => Promise<number>;
   playTrack: (id: string, list?: string[]) => void;
   toggle: () => void;
@@ -138,6 +148,54 @@ export const usePlayer = () => {
   return c;
 };
 
+function bufferToWave(abuffer: AudioBuffer, len: number): Blob {
+  const numOfChan = abuffer.numberOfChannels;
+  const length = len * numOfChan * 2 + 44;
+  const out = new DataView(new ArrayBuffer(length));
+  const channels: Float32Array[] = [];
+  let offset = 0;
+  let pos = 0;
+
+  function setUint16(data: number) {
+    out.setUint16(pos, data, true);
+    pos += 2;
+  }
+  function setUint32(data: number) {
+    out.setUint32(pos, data, true);
+    pos += 4;
+  }
+
+  setUint32(0x46464952); // "RIFF"
+  setUint32(length - 8);
+  setUint32(0x45564157); // "WAVE"
+  setUint32(0x20746d66); // "fmt "
+  setUint32(16);
+  setUint16(1); // PCM
+  setUint16(numOfChan);
+  setUint32(abuffer.sampleRate);
+  setUint32(abuffer.sampleRate * 2 * numOfChan);
+  setUint16(numOfChan * 2);
+  setUint16(16); // 16-bit
+  setUint32(0x61746164); // "data"
+  setUint32(length - pos - 4);
+
+  for (let i = 0; i < abuffer.numberOfChannels; i++) {
+    channels.push(abuffer.getChannelData(i));
+  }
+
+  while (offset < len) {
+    for (let i = 0; i < numOfChan; i++) {
+      let sample = Math.max(-1, Math.min(1, channels[i]![offset] || 0));
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+      out.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  return new Blob([out.buffer], { type: "audio/wav" });
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [library, setLibrary] = useState<Track[]>([]);
   const [queue, setQueue] = useState<string[]>([]);
@@ -152,9 +210,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState(false);
   const repeatOne = useRef(false);
 
-  // Equalizer State
+  // Equalizer State with persistent presets
   const [eqPreset, setEqPresetState] = useState<EqPreset>("Flat");
+  const [savedPresetGains, setSavedPresetGains] = useState<Record<EqPreset, number[]>>(() => ({
+    Flat: [...EQ_PRESETS.Flat],
+    "Bass Boost": [...EQ_PRESETS["Bass Boost"]],
+    Vocal: [...EQ_PRESETS.Vocal],
+    Acoustic: [...EQ_PRESETS.Acoustic],
+    Rock: [...EQ_PRESETS.Rock],
+    Electronic: [...EQ_PRESETS.Electronic],
+  }));
   const [eqGains, setEqGains] = useState<number[]>([...EQ_PRESETS.Flat]);
+  const [stemMode, setStemModeState] = useState<"normal" | "vocals-only" | "beats-only">("normal");
 
   const decks = useRef<HTMLAudioElement[]>([]);
   const active = useRef(0);

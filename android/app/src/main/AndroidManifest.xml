@@ -33,6 +33,26 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Foreground Audio Playback Service with MediaSession -->
+        <service
+            android:name=".SpoiledMediaService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Home-Screen Music Widget Provider -->
+        <receiver
+            android:name=".SpoiledAppWidgetProvider"
+            android:label="Spoiled Player"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/spoiled_app_widget_info" />
+        </receiver>
     </application>
 
     <!-- Permissions -->

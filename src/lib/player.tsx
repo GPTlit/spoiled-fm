@@ -306,6 +306,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
       fadeFrame.current = null;
       fading.current = false;
+
       const from = d[active.current]!;
       const shouldFade = fadeSeconds > 0 && !from.paused;
       const toIdx = shouldFade ? 1 - active.current : active.current;
@@ -318,6 +319,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         to.volume = 0;
         void to.play().catch(() => {
           from.pause();
+          from.currentTime = 0;
           fading.current = false;
         });
         const ms = Math.max(
@@ -334,6 +336,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             fadeFrame.current = requestAnimationFrame(step);
           } else {
             from.pause();
+            from.currentTime = 0;
             from.volume = vol;
             fading.current = false;
             fadeFrame.current = null;
@@ -342,7 +345,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         fadeFrame.current = requestAnimationFrame(step);
         active.current = toIdx;
       } else {
-        d.forEach((a, i) => i !== toIdx && a.pause());
+        // Immediate clean stop of all other decks to prevent two songs playing together
+        d.forEach((a, i) => {
+          if (i !== toIdx) {
+            a.pause();
+            a.currentTime = 0;
+            a.volume = vol;
+          }
+        });
         to.volume = vol;
         void to.play().catch(() => {});
         active.current = toIdx;
@@ -385,6 +395,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const a = decks.current[active.current]!;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
+
+      if (
+        typeof navigator !== "undefined" &&
+        "mediaSession" in navigator &&
+        "setPositionState" in navigator.mediaSession &&
+        isFinite(a.duration) &&
+        a.duration > 0
+      ) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(0, a.duration),
+            playbackRate: 1,
+            position: Math.min(Math.max(0, a.currentTime), a.duration),
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+
       const { crossfade, mixMode, index } = stateRef.current;
       const transition =
         mixMode === "automix" ? Math.min(6, Math.max(1.5, a.duration * 0.06)) : crossfade;
@@ -457,11 +486,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     navigator.mediaSession.setActionHandler("nexttrack", () => {
-      goTo(stateRef.current.index + 1);
+      goTo(stateRef.current.index + 1, 0);
     });
 
     navigator.mediaSession.setActionHandler("previoustrack", () => {
-      goTo(stateRef.current.index - 1);
+      goTo(stateRef.current.index - 1, 0);
     });
 
     navigator.mediaSession.setActionHandler("seekto", (details) => {
@@ -485,6 +514,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (a) a.currentTime = Math.max(0, a.currentTime - (details.seekOffset || 10));
     });
   }, [current, goTo]);
+
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+    }
+  }, [playing]);
 
   // Real ID3 extraction pipeline
   const addFiles = async (files: FileList | File[]): Promise<number> => {
@@ -526,7 +561,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (shuffle) q = [id, ...q.filter((x) => x !== id).sort(() => Math.random() - 0.5)];
     setQueue(q);
     stateRef.current.queue = q;
-    goTo(q.indexOf(id));
+    goTo(q.indexOf(id), 0);
   };
 
   const toggle = () => {
@@ -713,12 +748,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         addFiles,
         playTrack,
         toggle,
-        next: () =>
-          goTo(
-            index + 1,
-            mixMode === "automix" ? Math.min(6, Math.max(1.5, (duration || 60) * 0.06)) : crossfade,
-          ),
-        prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1)),
+        next: () => goTo(index + 1, 0),
+        prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1, 0)),
         seek: (t) => {
           const a = decks.current[active.current];
           if (a) a.currentTime = t;

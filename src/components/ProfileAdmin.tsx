@@ -336,14 +336,36 @@ export function ProfileAdmin({
               </select>
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => trackArtInputRef.current?.click()}
-              className="w-full h-9 rounded-xl border-white/30 dark:border-white/10 text-xs font-semibold"
-            >
-              Choose Custom Artwork Image
-            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => trackArtInputRef.current?.click()}
+                className="w-full h-9 rounded-xl border-white/30 dark:border-white/10 text-xs font-semibold"
+              >
+                Upload Image
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  if (!selectedTrackForArt) return;
+                  try {
+                    const logoUrl = customLogo || "/favicon.png";
+                    const res = await fetch(logoUrl);
+                    const blob = await res.blob();
+                    await onSetTrackArtwork(selectedTrackForArt, blob);
+                    setArtReplacementStatus("Real SPOILED app logo applied!");
+                    setTimeout(() => setArtReplacementStatus(null), 2500);
+                  } catch {
+                    setArtReplacementStatus("Failed to apply app logo");
+                  }
+                }}
+                className="w-full h-9 rounded-xl border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 text-xs font-semibold gap-1"
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Use App Logo
+              </Button>
+            </div>
             <input
               type="file"
               ref={trackArtInputRef}

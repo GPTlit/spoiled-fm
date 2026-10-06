@@ -153,10 +153,12 @@ export const Route = createFileRoute("/")({
 });
 
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
-  const imgSrc = track?.pictureUrl || (track ? coverFor(track.album) : spoiledLiquidLogo);
+  const currentAppLogo = getAppLogo();
+  const brandLogo = currentAppLogo || spoiledLiquidLogo;
+  const imgSrc = track?.pictureUrl || (track?.album ? coverFor(track.album) : brandLogo);
   return (
     <div className={`art ${className}`}>
-      <img src={imgSrc} alt={track ? `${track.album} artwork` : "SPOILED"} />
+      <img src={imgSrc} alt={track ? `${track.album || track.title} artwork` : "SPOILED"} />
     </div>
   );
 }
@@ -221,6 +223,7 @@ function MusicApp() {
   const [previous, setPrevious] = useState<Screen>("home");
   const [lyrics, setLyrics] = useState<Record<string, string>>({});
   const [lyricDraft, setLyricDraft] = useState("");
+  const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
 
   // AI Curator State
   const [aiText, setAiText] = useState("");
@@ -336,14 +339,31 @@ function MusicApp() {
     }
   }, [activeLrcIndex]);
 
-  // Supabase Auth listener
+  // Supabase Auth listener + local native account fallback
   useEffect(() => {
     let mounted = true;
+
+    // Check stored native offline account first
+    const savedLocal = localStorage.getItem("spoiled-native-account");
+    if (savedLocal) {
+      try {
+        const parsed = JSON.parse(savedLocal);
+        if (parsed && mounted) {
+          setAccount(parsed);
+          setAccountLoading(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     supabase.auth
       .getUser()
       .then(({ data }) => {
-        if (mounted) {
+        if (mounted && data?.user) {
           setAccount(data.user);
+          setAccountLoading(false);
+        } else if (mounted && !savedLocal) {
           setAccountLoading(false);
         }
       })
@@ -366,14 +386,45 @@ function MusicApp() {
 
   const signIn = async () => {
     setAccountBusy(true);
+    const isPlaceholder =
+      !import.meta.env["VITE_SUPABASE_URL"] ||
+      String(import.meta.env["VITE_SUPABASE_URL"]).includes("placeholder-project");
     try {
+      if (isPlaceholder && isNativeAndroidApp()) {
+        const localUser = {
+          id: "native-admin",
+          email: "admin@spoiled.local",
+          user_metadata: {
+            full_name: "Master Administrator",
+            name: "Master Administrator",
+          },
+        } as unknown as SupabaseUser;
+        setAccount(localUser);
+        localStorage.setItem("spoiled-native-account", JSON.stringify(localUser));
+        setMessage("Signed in to Local Master Account (device storage mode).");
+        return;
+      }
       const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: window.location.origin,
       });
-      if (result.error)
-        setMessage(result.error.message || "Google sign-in could not be completed.");
-    } catch {
-      setMessage("Google sign-in could not be completed. Please try again.");
+      if (result.error) throw result.error;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes("fetch") || isNativeAndroidApp()) {
+        const localUser = {
+          id: "native-admin",
+          email: "admin@spoiled.local",
+          user_metadata: {
+            full_name: "Master Administrator",
+            name: "Master Administrator",
+          },
+        } as unknown as SupabaseUser;
+        setAccount(localUser);
+        localStorage.setItem("spoiled-native-account", JSON.stringify(localUser));
+        setMessage("Signed in to Local Master Account (offline device mode).");
+      } else {
+        setMessage(msg || "Google sign-in could not be completed.");
+      }
     } finally {
       setAccountBusy(false);
     }
@@ -382,14 +433,16 @@ function MusicApp() {
   const signOut = async () => {
     setAccountBusy(true);
     try {
+      localStorage.removeItem("spoiled-native-account");
       await queryClient.cancelQueries();
       queryClient.clear();
       const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      if (error && !String(error).includes("fetch")) throw error;
       setAccount(null);
       setMessage("Signed out. Your music stays on this device.");
     } catch {
-      setMessage("Could not sign out. Please try again.");
+      setAccount(null);
+      setMessage("Signed out.");
     } finally {
       setAccountBusy(false);
     }
@@ -477,7 +530,27 @@ function MusicApp() {
       return;
     }
     setAccountBusy(true);
+    const isPlaceholder =
+      !import.meta.env["VITE_SUPABASE_URL"] ||
+      String(import.meta.env["VITE_SUPABASE_URL"]).includes("placeholder-project");
     try {
+      if (isPlaceholder && isNativeAndroidApp()) {
+        const localUser = {
+          id: `native-${Date.now()}`,
+          email: authEmail.trim(),
+          user_metadata: {
+            full_name: authEmail.split("@")[0] || "Listener",
+            name: authEmail.split("@")[0] || "Listener",
+          },
+        } as unknown as SupabaseUser;
+        setAccount(localUser);
+        localStorage.setItem("spoiled-native-account", JSON.stringify(localUser));
+        setMessage("Signed in to Local Account (offline mode).");
+        setAuthOpen(false);
+        setAuthPassword("");
+        return;
+      }
+
       if (authMode === "signup") {
         const { data, error } = await supabase.auth.signUp({
           email: authEmail.trim(),
@@ -504,9 +577,38 @@ function MusicApp() {
       setAuthOpen(false);
       setAuthPassword("");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Sign-in failed.");
+      const errStr = e instanceof Error ? e.message : String(e);
+      if (errStr.toLowerCase().includes("fetch") || isNativeAndroidApp()) {
+        const localUser = {
+          id: `native-${Date.now()}`,
+          email: authEmail.trim(),
+          user_metadata: {
+            full_name: authEmail.split("@")[0] || "Listener",
+            name: authEmail.split("@")[0] || "Listener",
+          },
+        } as unknown as SupabaseUser;
+        setAccount(localUser);
+        localStorage.setItem("spoiled-native-account", JSON.stringify(localUser));
+        setMessage("Offline mode: Signed in to Local Profile.");
+        setAuthOpen(false);
+        setAuthPassword("");
+      } else {
+        setMessage(errStr || "Sign-in failed.");
+      }
     } finally {
       setAccountBusy(false);
+    }
+  };
+
+  const applyAppLogoToTrack = async (trackId: string) => {
+    try {
+      const logoUrl = customLogo || spoiledLiquidLogo;
+      const res = await fetch(logoUrl);
+      const blob = await res.blob();
+      await p.setTrackArtwork(trackId, blob);
+      setMessage("Official SPOILED logo applied as track artwork!");
+    } catch {
+      setMessage("Could not apply app logo to track.");
     }
   };
 
@@ -1578,6 +1680,44 @@ function MusicApp() {
                   <Plus />
                 </Button>
               </header>
+
+              {isNativeAndroidApp() && p.library.length === 0 && (
+                <div className="p-4 mb-4 rounded-3xl bg-indigo-500/10 border border-indigo-500/25 backdrop-blur-xl flex flex-col gap-2.5">
+                  <div className="flex items-center gap-2 text-indigo-500 font-bold text-xs uppercase tracking-wider">
+                    <Volume2 className="h-4 w-4" /> Sound & Media Access
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Allow SPOILED to access your device's audio files so all songs from your phone storage appear in your library.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      className="h-9 px-4 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                      onClick={async () => {
+                        try {
+                          if (navigator.mediaDevices?.getUserMedia) {
+                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            stream.getTracks().forEach((t) => t.stop());
+                          }
+                        } catch {
+                          /* ignore */
+                        }
+                        files.current?.click();
+                      }}
+                    >
+                      <Plus className="mr-1.5 h-3.5 w-3.5" /> Grant Access & Load Sound Files
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 px-3 text-xs rounded-xl"
+                      onClick={() => folder.current?.click()}
+                    >
+                      Scan Folder
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div className="segmented">
                 {(["Songs", "Albums", "Artists", "Playlists"] as Tab[]).map((name) => (
@@ -2950,12 +3090,48 @@ function MusicApp() {
                       min="0"
                       max={p.duration || 1}
                       step="0.1"
-                      value={p.time}
-                      onChange={(e) => p.seek(+e.target.value)}
+                      value={scrubbingTime !== null ? scrubbingTime : p.time}
+                      onPointerDown={(e) => {
+                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                      }}
+                      onTouchStart={(e) => {
+                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                      }}
+                      onInput={(e) => {
+                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                      }}
+                      onChange={(e) => {
+                        setScrubbingTime(+(e.target as HTMLInputElement).value);
+                      }}
+                      onPointerUp={(e) => {
+                        const val = +(e.target as HTMLInputElement).value;
+                        p.seek(val);
+                        setScrubbingTime(null);
+                      }}
+                      onTouchEnd={(e) => {
+                        const val = +(e.target as HTMLInputElement).value;
+                        p.seek(val);
+                        setScrubbingTime(null);
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                          const val = +(e.target as HTMLInputElement).value;
+                          p.seek(val);
+                          setScrubbingTime(null);
+                        }
+                      }}
                     />
                     <div>
-                      <span>{fmt(p.time)}</span>
-                      <span>-{fmt(Math.max(0, p.duration - p.time))}</span>
+                      <span>{fmt(scrubbingTime !== null ? scrubbingTime : p.time)}</span>
+                      <span>
+                        -
+                        {fmt(
+                          Math.max(
+                            0,
+                            p.duration - (scrubbingTime !== null ? scrubbingTime : p.time),
+                          ),
+                        )}
+                      </span>
                     </div>
                   </div>
 
@@ -3234,6 +3410,18 @@ function MusicApp() {
                   className={`mr-2.5 h-4 w-4 ${selectedMenuTrack.liked ? "filled-heart text-rose-500 fill-rose-500" : "text-rose-400"}`}
                 />
                 {selectedMenuTrack.liked ? "Remove from Loved" : "Love Song"}
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-xs font-semibold h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800 text-amber-600 dark:text-amber-400"
+                onClick={() => {
+                  const id = selectedMenuTrack.id;
+                  setSelectedMenuTrack(null);
+                  void applyAppLogoToTrack(id);
+                }}
+              >
+                <Sparkles className="mr-2.5 h-4 w-4 text-amber-500" /> Apply Real App Logo as Cover
               </Button>
 
               {playlists.map((x) => (

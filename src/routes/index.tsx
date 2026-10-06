@@ -82,7 +82,20 @@ import { DiscoverSearch } from "@/components/DiscoverSearch";
 import { StudioVideoPlayer } from "@/components/StudioVideoPlayer";
 import { CameraPhotoEditor } from "@/components/CameraPhotoEditor";
 import { ProfileAdmin } from "@/components/ProfileAdmin";
-import { getAppTitle, getAppLogo } from "@/lib/user-preferences";
+import {
+  getAppTitle,
+  getAppLogo,
+  getActiveLogoUrl,
+  getActiveLogoId,
+  selectBuiltinLogo,
+  BUILTIN_LOGOS,
+  getDesignSystem,
+  setDesignSystem,
+  getColorPalette,
+  setColorPalette,
+  type DesignSystem,
+  type ColorPalette,
+} from "@/lib/user-preferences";
 import { Globe, Camera as CameraIcon, Palette, Pencil } from "lucide-react";
 import {
   downloadViaNativeDevice,
@@ -160,8 +173,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Art({ track, className = "" }: { track?: Track | undefined; className?: string }) {
-  const currentAppLogo = getAppLogo();
-  const brandLogo = currentAppLogo || spoiledLiquidLogo;
+  const brandLogo = getActiveLogoUrl();
   // Use track's embedded/custom artwork, or the official app logo / admin custom logo as default
   const imgSrc = track?.pictureUrl || brandLogo;
   return (
@@ -220,6 +232,10 @@ function MusicApp() {
   const [selectedPlaylist, setSelectedPlaylist] = useState("Chill Vibes");
   const [menu, setMenu] = useState<string | null>(null);
   const [theme, setTheme] = useState("Liquid Glass (Light)");
+  const [designSystem, setDesignSystemState] = useState<DesignSystem>(getDesignSystem());
+  const [colorPalette, setColorPaletteState] = useState<ColorPalette>(getColorPalette());
+  const [activeLogo, setActiveLogo] = useState<string>(getActiveLogoUrl());
+  const [activeLogoId, setActiveLogoIdState] = useState<string>(getActiveLogoId());
   const [plays, setPlays] = useState<Record<string, number>>({});
   const [playMode, setPlayMode] = useState<"loop-all" | "loop-one" | "shuffle">("loop-all");
   const [playerStyle, setPlayerStyle] = useState("Default");
@@ -687,6 +703,27 @@ function MusicApp() {
     } catch {
       // ignore corrupt prefs
     }
+
+    const onLogoChanged = () => {
+      setActiveLogo(getActiveLogoUrl());
+      setActiveLogoIdState(getActiveLogoId());
+    };
+    const onDesignChanged = () => {
+      setDesignSystemState(getDesignSystem());
+    };
+    const onPaletteChanged = () => {
+      setColorPaletteState(getColorPalette());
+    };
+
+    window.addEventListener("spoiled-logo-changed", onLogoChanged);
+    window.addEventListener("spoiled-design-changed", onDesignChanged);
+    window.addEventListener("spoiled-palette-changed", onPaletteChanged);
+
+    return () => {
+      window.removeEventListener("spoiled-logo-changed", onLogoChanged);
+      window.removeEventListener("spoiled-design-changed", onDesignChanged);
+      window.removeEventListener("spoiled-palette-changed", onPaletteChanged);
+    };
   }, []);
   useEffect(() => {
     const id = p.current?.id;
@@ -1507,13 +1544,17 @@ function MusicApp() {
       ? "explore"
       : screen;
 
-  const isVelvet = theme.startsWith("Velvet");
+  const isVelvet = colorPalette === "deep" || theme.startsWith("Velvet");
   const isDark =
-    isVelvet || theme.toLowerCase().includes("dark") || theme.toLowerCase().includes("obsidian");
+    colorPalette === "dark" ||
+    isVelvet ||
+    theme.toLowerCase().includes("dark") ||
+    theme.toLowerCase().includes("obsidian");
+  const currentBrandLogo = activeLogo || customLogo || getActiveLogoUrl();
 
   return (
     <div
-      className={`app-shell ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current && !["now", "lyrics", "queue", "studio"].includes(screen) ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue", "studio"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
+      className={`app-shell design-${designSystem} palette-${colorPalette} ${isDark ? "dark" : ""} ${isVelvet ? "velvet" : ""} ${p.current && !["now", "lyrics", "queue", "studio"].includes(screen) ? "has-mini" : ""} player-style-${playerStyle.toLowerCase().replace(/\s+/g, "-")} ${["now", "lyrics", "queue", "studio"].includes(screen) ? "immersive-player" : ""} ${["home", "library"].includes(screen) ? "scroll-page" : "fixed-page"}`}
     >
       <div className="ambient-liquid-orbs" aria-hidden="true">
         <div className="orb orb-1" />
@@ -1612,7 +1653,7 @@ function MusicApp() {
         <aside className="desktop-sidebar">
           <div className="brand-badge">
             <div className="brand-icon-wrapper">
-              <img src={spoiledLiquidLogo} alt="SPOILED" className="brand-logo" />
+              <img src={currentBrandLogo} alt="SPOILED" className="brand-logo" />
             </div>
             <div className="brand-text">
               <span className="brand-title">SPOILED</span>
@@ -1691,7 +1732,7 @@ function MusicApp() {
             <>
               <div className="topline">
                 <div className="topline-brand">
-                  <img src={customLogo || spoiledLiquidLogo} alt="" className="topline-icon" />
+                  <img src={currentBrandLogo} alt="" className="topline-icon" />
                   <span>{customAppTitle}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -3225,19 +3266,71 @@ function MusicApp() {
               </div>
               <div className="settings-group">
                 <div className="settings-row">
-                  <Settings2 />
-                  <span>Appearance</span>
+                  <Palette />
+                  <span>Design Style</span>
                   <select
-                    aria-label="Appearance"
-                    value={theme}
+                    aria-label="Design Style"
+                    value={designSystem}
                     onChange={(e) => {
-                      setTheme(e.target.value);
-                      localStorage.setItem("spoiled-theme", e.target.value);
+                      const val = e.target.value as DesignSystem;
+                      setDesignSystem(val);
+                      setDesignSystemState(val);
+                      setMessage(
+                        `Switched design to ${val === "cupertino" ? "Cupertino Precision (Prototype Design)" : "Liquid Glass"}`,
+                      );
                     }}
                   >
-                    <option>Liquid Glass (Light)</option>
-                    <option>Liquid Obsidian (Dark)</option>
-                    <option>Velvet Night (Deep)</option>
+                    <option value="liquid">Liquid Glass (Original)</option>
+                    <option value="cupertino">Cupertino Precision (Prototype Design)</option>
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <Settings2 />
+                  <span>Color Palette</span>
+                  <select
+                    aria-label="Color Palette"
+                    value={colorPalette}
+                    onChange={(e) => {
+                      const val = e.target.value as ColorPalette;
+                      setColorPalette(val);
+                      setColorPaletteState(val);
+                      if (val === "light") {
+                        setTheme("Liquid Glass (Light)");
+                        localStorage.setItem("spoiled-theme", "Liquid Glass (Light)");
+                      } else if (val === "dark") {
+                        setTheme("Liquid Obsidian (Dark)");
+                        localStorage.setItem("spoiled-theme", "Liquid Obsidian (Dark)");
+                      } else {
+                        setTheme("Velvet Night (Deep)");
+                        localStorage.setItem("spoiled-theme", "Velvet Night (Deep)");
+                      }
+                      setMessage(`Theme color changed to ${val.toUpperCase()}`);
+                    }}
+                  >
+                    <option value="light">Light</option>
+                    <option value="dark">Dark (Obsidian / Slate)</option>
+                    <option value="deep">Deep (Midnight / Velvet)</option>
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <Disc3 />
+                  <span>App Logo</span>
+                  <select
+                    aria-label="App Logo"
+                    value={activeLogoId}
+                    onChange={(e) => {
+                      const val = e.target.value as "obsidian" | "iridescent";
+                      selectBuiltinLogo(val);
+                      setActiveLogoIdState(val);
+                      const chosen = BUILTIN_LOGOS.find((l) => l.id === val);
+                      if (chosen) setActiveLogo(chosen.url);
+                      setMessage(
+                        `App logo set to ${val === "iridescent" ? "Iridescent Pastel Glass (Second Logo)" : "Liquid Obsidian (Original Logo)"}`,
+                      );
+                    }}
+                  >
+                    <option value="obsidian">Liquid Obsidian (Original Logo)</option>
+                    <option value="iridescent">Iridescent Pastel Glass (Second Logo)</option>
                   </select>
                 </div>
                 <div className="settings-row">
@@ -3273,7 +3366,7 @@ function MusicApp() {
               </div>
               <div className="settings-footer">
                 <div className="liquid-icon-frame">
-                  <img src={spoiledLiquidLogo} alt="SPOILED" />
+                  <img src={currentBrandLogo} alt="SPOILED" />
                 </div>
                 <strong>SPOILED</strong>
                 <small>Your Music. Your World. Liquid Glass.</small>

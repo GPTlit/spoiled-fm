@@ -1,4 +1,20 @@
 import defaultAppLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
+import secondAppLogo from "@/assets/images/spoiled_second_logo_1791295005942.jpg";
+
+export const BUILTIN_LOGOS = [
+  {
+    id: "obsidian",
+    label: "Liquid Obsidian (Original Logo)",
+    description: "Deep obsidian glass with liquid gloss core",
+    url: defaultAppLogo,
+  },
+  {
+    id: "iridescent",
+    label: "Iridescent Pastel Glass (Second Logo)",
+    description: "Holographic pastel cube with glossy note (Prototype)",
+    url: secondAppLogo,
+  },
+] as const;
 
 export interface WatchedVideo {
   id: string;
@@ -153,7 +169,7 @@ export function getAppLogo(): string | null {
   return localStorage.getItem(APP_LOGO_KEY);
 }
 
-export function getAppCoverLogo(): string {
+export function getActiveLogoUrl(): string {
   if (typeof window !== "undefined") {
     const userCustom = localStorage.getItem(APP_LOGO_KEY);
     if (userCustom) return userCustom;
@@ -161,9 +177,35 @@ export function getAppCoverLogo(): string {
   return defaultAppLogo;
 }
 
+export function getActiveLogoId(): "obsidian" | "iridescent" | "custom" {
+  if (typeof window === "undefined") return "obsidian";
+  const current = localStorage.getItem(APP_LOGO_KEY);
+  if (!current || current === defaultAppLogo) return "obsidian";
+  if (current === secondAppLogo) return "iridescent";
+  return "custom";
+}
+
+export function getAppCoverLogo(): string {
+  return getActiveLogoUrl();
+}
+
 export function setAppLogo(dataUrl: string) {
   if (typeof window === "undefined") return;
   localStorage.setItem(APP_LOGO_KEY, dataUrl);
+  window.dispatchEvent(new CustomEvent("spoiled-logo-changed", { detail: dataUrl }));
+}
+
+export function selectBuiltinLogo(logoId: "obsidian" | "iridescent") {
+  const selected = BUILTIN_LOGOS.find((l) => l.id === logoId);
+  if (selected) {
+    setAppLogo(selected.url);
+  }
+}
+
+export function resetToDefaultLogo() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(APP_LOGO_KEY);
+  window.dispatchEvent(new CustomEvent("spoiled-logo-changed", { detail: defaultAppLogo }));
 }
 
 export function setFavicon(dataUrl: string) {
@@ -175,4 +217,49 @@ export function setFavicon(dataUrl: string) {
     document.head.appendChild(link);
   }
   link.href = dataUrl;
+}
+
+export type DesignSystem = "liquid" | "cupertino";
+export type ColorPalette = "light" | "dark" | "deep";
+export type CupertinoColor = "light" | "dark" | "midnight";
+
+const DESIGN_SYSTEM_KEY = "spoiled_design_system_v1";
+const THEME_PALETTE_KEY = "spoiled_theme_palette_v1";
+const CUPERTINO_COLOR_KEY = "spoiled_cupertino_color_v1";
+
+export function getDesignSystem(): DesignSystem {
+  if (typeof window === "undefined") return "liquid";
+  const saved = localStorage.getItem(DESIGN_SYSTEM_KEY);
+  return saved === "cupertino" ? "cupertino" : "liquid";
+}
+
+export function setDesignSystem(ds: DesignSystem) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(DESIGN_SYSTEM_KEY, ds);
+  window.dispatchEvent(new CustomEvent("spoiled-design-changed", { detail: ds }));
+}
+
+export function getColorPalette(): ColorPalette {
+  if (typeof window === "undefined") return "light";
+  const saved = localStorage.getItem(THEME_PALETTE_KEY);
+  if (saved === "dark" || saved === "deep") return saved;
+  return "light";
+}
+
+export function setColorPalette(palette: ColorPalette) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(THEME_PALETTE_KEY, palette);
+  window.dispatchEvent(new CustomEvent("spoiled-palette-changed", { detail: palette }));
+}
+
+export function getCupertinoColor(): CupertinoColor {
+  if (typeof window === "undefined") return "light";
+  const saved = localStorage.getItem(CUPERTINO_COLOR_KEY);
+  if (saved === "dark" || saved === "midnight") return saved;
+  return "light";
+}
+
+export function setCupertinoColor(col: CupertinoColor) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(CUPERTINO_COLOR_KEY, col);
 }

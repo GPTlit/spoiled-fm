@@ -1,6 +1,6 @@
 @import "tailwindcss" source(none);
-@source "../src";
 @import "tw-animate-css";
+@source "../src";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -1969,8 +1969,25 @@
 }
 
 /* ==========================================================================
-   MINI PLAYER (FLOATING LIQUID DOCK)
+   MINI PLAYER (FLOATING LIQUID DOCK & FROSTED BLUR BACKDROP)
    ========================================================================== */
+.mini-player-blur-shield {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, calc(100% - 32px));
+  height: 92px;
+  border-radius: 46px;
+  pointer-events: none;
+  z-index: 38;
+  backdrop-filter: blur(48px) saturate(220%) contrast(106%);
+  -webkit-backdrop-filter: blur(48px) saturate(220%) contrast(106%);
+  background: color-mix(in oklab, var(--background) 55%, transparent);
+  mask-image: radial-gradient(ellipse 96% 85% at 50% 50%, black 50%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 96% 85% at 50% 50%, black 50%, transparent 100%);
+}
+
 .mini-player {
   position: fixed;
   bottom: 32px;
@@ -1984,9 +2001,9 @@
   gap: 8px;
   padding: 8px 16px;
   border-radius: 36px;
-  background: var(--liquid-glass-surface);
-  backdrop-filter: blur(36px) saturate(200%) brightness(105%);
-  -webkit-backdrop-filter: blur(36px) saturate(200%) brightness(105%);
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  backdrop-filter: blur(52px) saturate(220%) brightness(102%) contrast(106%);
+  -webkit-backdrop-filter: blur(52px) saturate(220%) brightness(102%) contrast(106%);
   border: 1px solid var(--liquid-glass-border);
   box-shadow:
     0 24px 56px -12px rgba(40, 65, 100, 0.28),
@@ -1998,6 +2015,10 @@
 }
 
 .dark .mini-player {
+  background: color-mix(in oklab, var(--background) 86%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(52px) saturate(220%) brightness(96%) contrast(106%);
+  -webkit-backdrop-filter: blur(52px) saturate(220%) brightness(96%) contrast(106%);
   box-shadow:
     0 24px 56px -12px rgba(0, 0, 0, 0.75),
     inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.3);
@@ -2180,6 +2201,16 @@
   .album-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 12px;
+  }
+
+  .mini-player-blur-shield {
+    bottom: 74px;
+    width: calc(100% - 16px);
+    height: 86px;
+    border-radius: 36px;
+    backdrop-filter: blur(48px) saturate(220%);
+    -webkit-backdrop-filter: blur(48px) saturate(220%);
+    background: color-mix(in oklab, var(--background) 60%, transparent);
   }
 
   .mini-player {
@@ -3785,9 +3816,15 @@ body,
   }
 }
 .app-shell .mini-player {
-  background: color-mix(in oklab, var(--background) 35%, transparent);
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  backdrop-filter: blur(52px) saturate(220%) brightness(102%) contrast(106%);
+  -webkit-backdrop-filter: blur(52px) saturate(220%) brightness(102%) contrast(106%);
+}
+.app-shell.dark .mini-player,
+.dark .app-shell .mini-player {
+  background: color-mix(in oklab, var(--background) 86%, transparent);
+  backdrop-filter: blur(52px) saturate(220%) brightness(96%) contrast(106%);
+  -webkit-backdrop-filter: blur(52px) saturate(220%) brightness(96%) contrast(106%);
 }
 .velvet {
   --background: oklch(0.16 0.04 300);
@@ -4104,4 +4141,87 @@ li::-webkit-scrollbar,
 body:has(.explore-video-page) .bottom-nav,
 body:has(.explore-video-page) .mini-player {
   display: none !important;
+}
+
+/* ==========================================================================
+   PROTOTYPE DESIGN SYSTEM: CUPERTINO PRECISION GLASS
+   Clean precision frosted surfaces, hairline specular borders,
+   crisp segmented controls, floating glass mini player dock.
+   ========================================================================== */
+
+.design-cupertino {
+  --radius: 1.15rem;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.design-cupertino .ambient-liquid-orbs {
+  opacity: 0.3;
+  filter: blur(85px);
+}
+
+.design-cupertino .card,
+.design-cupertino .stat-tile,
+.design-cupertino .profile-card,
+.design-cupertino .video-card,
+.design-cupertino .settings-group {
+  border-radius: 1.25rem !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.06), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+.design-cupertino .mini-player {
+  border-radius: 1.5rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 14px 40px -8px rgba(0, 0, 0, 0.2), inset 0 1px 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+.design-cupertino .bottom-nav {
+  border-top: 1px solid var(--border) !important;
+}
+
+.design-cupertino .bottom-nav button.selected {
+  transform: translateY(-2px);
+  color: var(--primary) !important;
+}
+
+.design-cupertino .quick-grid button,
+.design-cupertino .recent-grid button {
+  border-radius: 1.2rem !important;
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.15s ease !important;
+}
+
+.design-cupertino .quick-grid button:hover,
+.design-cupertino .recent-grid button:hover {
+  transform: translateY(-2px);
+}
+
+/* 3 Color Palettes for both designs */
+.palette-light {
+  --background: oklch(0.98 0.005 240);
+  --foreground: oklch(0.18 0.015 250);
+  --card: rgba(255, 255, 255, 0.75);
+  --border: rgba(0, 0, 0, 0.08);
+  --muted: rgba(0, 0, 0, 0.04);
+  --muted-foreground: oklch(0.48 0.02 245);
+}
+
+.palette-dark {
+  --background: oklch(0.12 0.012 255);
+  --foreground: oklch(0.98 0 0);
+  --card: rgba(26, 32, 44, 0.65);
+  --border: rgba(255, 255, 255, 0.14);
+  --muted: rgba(255, 255, 255, 0.07);
+  --muted-foreground: oklch(0.7 0.015 245);
+}
+
+.palette-deep {
+  --background: oklch(0.14 0.05 280);
+  --foreground: oklch(0.97 0.01 280);
+  --card: rgba(28, 24, 52, 0.7);
+  --border: rgba(160, 140, 240, 0.22);
+  --muted: rgba(160, 140, 240, 0.08);
+  --muted-foreground: oklch(0.72 0.05 285);
+  background: radial-gradient(100% 70% at 20% 0%, oklch(0.25 0.1 290 / 0.5), transparent 60%),
+    radial-gradient(80% 60% at 80% 100%, oklch(0.24 0.12 240 / 0.45), transparent 60%),
+    var(--background);
 }

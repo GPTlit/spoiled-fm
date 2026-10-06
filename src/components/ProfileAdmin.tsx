@@ -21,6 +21,7 @@ import {
   Sliders,
   Play,
   Monitor,
+  Palette,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,17 @@ import {
   getWatchHistory,
   clearWatchHistory,
   type WatchedVideo,
+  BUILTIN_LOGOS,
+  getActiveLogoUrl,
+  getActiveLogoId,
+  selectBuiltinLogo,
+  resetToDefaultLogo,
+  getDesignSystem,
+  setDesignSystem,
+  getColorPalette,
+  setColorPalette,
+  type DesignSystem,
+  type ColorPalette,
 } from "@/lib/user-preferences";
 import type { Track } from "@/lib/player";
 
@@ -50,7 +62,10 @@ export function ProfileAdmin({
 }: ProfileAdminProps) {
   // Admin Branding Customization
   const [appTitleDraft, setAppTitleDraft] = useState(getAppTitle());
-  const [customLogo, setCustomLogoState] = useState<string | null>(getAppLogo());
+  const [activeLogoUrl, setActiveLogoUrl] = useState(getActiveLogoUrl());
+  const [activeLogoId, setActiveLogoId] = useState(getActiveLogoId());
+  const [designSystem, setDesignSystemState] = useState<DesignSystem>(getDesignSystem());
+  const [colorPalette, setColorPaletteState] = useState<ColorPalette>(getColorPalette());
   const [brandSavedStatus, setBrandSavedStatus] = useState<string | null>(null);
 
   // Artwork Replacement on Tracks
@@ -100,11 +115,43 @@ export function ProfileAdmin({
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       setAppLogo(dataUrl);
-      setCustomLogoState(dataUrl);
+      setActiveLogoUrl(dataUrl);
+      setActiveLogoId("custom");
       setBrandSavedStatus("Custom brand icon applied");
       setTimeout(() => setBrandSavedStatus(null), 2500);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleSelectBuiltinLogo = (logoId: "obsidian" | "iridescent") => {
+    selectBuiltinLogo(logoId);
+    setActiveLogoId(logoId);
+    const chosen = BUILTIN_LOGOS.find((l) => l.id === logoId);
+    if (chosen) setActiveLogoUrl(chosen.url);
+    setBrandSavedStatus(`Switched logo to: ${logoId === "iridescent" ? "Iridescent Pastel Glass (Second Logo)" : "Liquid Obsidian (Original Logo)"}`);
+    setTimeout(() => setBrandSavedStatus(null), 2500);
+  };
+
+  const handleResetLogo = () => {
+    resetToDefaultLogo();
+    setActiveLogoId("obsidian");
+    setActiveLogoUrl(BUILTIN_LOGOS[0].url);
+    setBrandSavedStatus("Logo reset to original Liquid Obsidian");
+    setTimeout(() => setBrandSavedStatus(null), 2500);
+  };
+
+  const handleSelectDesignSystem = (ds: DesignSystem) => {
+    setDesignSystem(ds);
+    setDesignSystemState(ds);
+    setBrandSavedStatus(`Design switched to: ${ds === "cupertino" ? "Cupertino Precision (Prototype Design)" : "Liquid Glass (Original)"}`);
+    setTimeout(() => setBrandSavedStatus(null), 2500);
+  };
+
+  const handleSelectColorPalette = (cp: ColorPalette) => {
+    setColorPalette(cp);
+    setColorPaletteState(cp);
+    setBrandSavedStatus(`Color palette switched to: ${cp.toUpperCase()}`);
+    setTimeout(() => setBrandSavedStatus(null), 2500);
   };
 
   // Handle Favicon Upload
@@ -213,9 +260,9 @@ export function ProfileAdmin({
 
       {/* Profile Header Card */}
       <div className="p-4 rounded-3xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 backdrop-blur-2xl shadow-xl flex items-center gap-3.5">
-        <div className="relative w-16 h-16 rounded-2xl overflow-hidden bg-primary/10 border-2 border-white/40 dark:border-white/15 shadow-md flex items-center justify-center">
-          {customLogo ? (
-            <img src={customLogo} alt="App Logo" className="w-full h-full object-cover" />
+        <div className="relative w-16 h-16 rounded-2xl overflow-hidden bg-primary/10 border-2 border-white/40 dark:border-white/15 shadow-md flex items-center justify-center shrink-0">
+          {activeLogoUrl ? (
+            <img src={activeLogoUrl} alt="App Logo" className="w-full h-full object-cover" />
           ) : (
             <User className="h-8 w-8 text-primary" />
           )}
@@ -227,21 +274,72 @@ export function ProfileAdmin({
             <span>Master Administrator</span>
           </div>
           <h2 className="text-base font-bold text-foreground truncate">{appTitleDraft}</h2>
-          <p className="text-xs text-muted-foreground">Mobile Web Applet & Native Shell Bridge</p>
+          <p className="text-xs text-muted-foreground">
+            {designSystem === "cupertino" ? "Cupertino Precision Glass (Prototype)" : "Liquid Glass Design"} · {colorPalette.toUpperCase()}
+          </p>
         </div>
       </div>
 
-      {/* SECTION 1: Admin Branding Customization */}
+      {/* SECTION 1: App Logos & Brand Identity */}
       <div className="p-4 rounded-3xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-lg space-y-4">
         <div className="flex items-center justify-between pb-2 border-b border-white/20 dark:border-white/10">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
             <Settings className="h-3.5 w-3.5 text-emerald-500" />
-            <span>App Branding & Custom Identity</span>
+            <span>App Logo & Brand Mark</span>
           </h3>
+          {activeLogoId !== "obsidian" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+              onClick={handleResetLogo}
+            >
+              Reset to Original
+            </Button>
+          )}
+        </div>
+
+        {/* Changeable Logos Selector */}
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Select App Logo (Changeable Brand Icon)
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {BUILTIN_LOGOS.map((logo) => {
+              const isSelected = activeLogoId === logo.id;
+              return (
+                <button
+                  key={logo.id}
+                  type="button"
+                  onClick={() => handleSelectBuiltinLogo(logo.id as "obsidian" | "iridescent")}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition-all ${
+                    isSelected
+                      ? "bg-primary/10 border-primary shadow-md ring-2 ring-primary/30"
+                      : "bg-white/30 dark:bg-white/5 border-white/20 dark:border-white/10 hover:bg-white/50 dark:hover:bg-white/10"
+                  }`}
+                >
+                  <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-white/30 shadow-sm bg-black/10">
+                    <img src={logo.url} alt={logo.label} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold text-foreground truncate">{logo.label}</span>
+                      {isSelected && (
+                        <span className="shrink-0 text-[10px] bg-primary text-primary-foreground font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                          <Check className="h-2.5 w-2.5" /> Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate">{logo.description}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Change App Title */}
-        <form onSubmit={handleSaveAppTitle} className="space-y-2">
+        <form onSubmit={handleSaveAppTitle} className="space-y-2 pt-2 border-t border-white/10">
           <label className="block text-xs font-semibold text-muted-foreground">
             App Name / Wordmark
           </label>
@@ -258,11 +356,11 @@ export function ProfileAdmin({
           </div>
         </form>
 
-        {/* Logo & Favicon Upload */}
+        {/* Custom Uploads */}
         <div className="grid grid-cols-2 gap-3 pt-2">
           <div>
             <label className="block text-xs font-semibold text-muted-foreground mb-1">
-              Custom Brand Logo
+              Upload Custom Logo
             </label>
             <Button
               variant="outline"
@@ -270,7 +368,7 @@ export function ProfileAdmin({
               onClick={() => logoInputRef.current?.click()}
               className="w-full text-xs h-9 rounded-xl border-white/30 dark:border-white/10 justify-center"
             >
-              Upload New Logo
+              Custom File
             </Button>
             <input
               type="file"
@@ -308,6 +406,98 @@ export function ProfileAdmin({
             {brandSavedStatus}
           </div>
         )}
+      </div>
+
+      {/* SECTION 1B: Design System & Color Prototype Switcher */}
+      <div className="p-4 rounded-3xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 backdrop-blur-xl shadow-lg space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-white/20 dark:border-white/10">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Palette className="h-3.5 w-3.5 text-indigo-500" />
+            <span>Design Style & Color Palettes</span>
+          </h3>
+        </div>
+
+        {/* Design System Choice */}
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Design Prototype (Switch Between Design Layouts)
+          </label>
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleSelectDesignSystem("liquid")}
+              className={`p-3 rounded-2xl border text-left transition-all ${
+                designSystem === "liquid"
+                  ? "bg-primary text-primary-foreground border-primary shadow-lg"
+                  : "bg-white/30 dark:bg-white/5 border-white/20 dark:border-white/10 text-foreground hover:bg-white/50"
+              }`}
+            >
+              <div className="font-bold text-xs mb-0.5">Liquid Glass (Original)</div>
+              <div className="text-[11px] opacity-80 leading-tight">
+                Organic fluid orbs, liquid soundwave & gloss docks
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectDesignSystem("cupertino")}
+              className={`p-3 rounded-2xl border text-left transition-all ${
+                designSystem === "cupertino"
+                  ? "bg-primary text-primary-foreground border-primary shadow-lg"
+                  : "bg-white/30 dark:bg-white/5 border-white/20 dark:border-white/10 text-foreground hover:bg-white/50"
+              }`}
+            >
+              <div className="font-bold text-xs mb-0.5 flex items-center justify-between">
+                <span>Cupertino Precision</span>
+                <span className="text-[9px] px-1 py-0.2 bg-emerald-500 text-white rounded font-mono">NEW</span>
+              </div>
+              <div className="text-[11px] opacity-80 leading-tight">
+                Precision frosted cards, hairline borders, clean mobile layout
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* 3 Color Palettes for the Design */}
+        <div className="space-y-2 pt-2 border-t border-white/10">
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Color Palette (All 3 Colors Available for Current Design)
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => handleSelectColorPalette("light")}
+              className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all text-center ${
+                colorPalette === "light"
+                  ? "bg-white text-slate-900 border-white shadow-md ring-2 ring-primary"
+                  : "bg-white/40 dark:bg-white/5 border-white/20 text-foreground"
+              }`}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectColorPalette("dark")}
+              className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all text-center ${
+                colorPalette === "dark"
+                  ? "bg-slate-900 text-white border-slate-700 shadow-md ring-2 ring-primary"
+                  : "bg-white/40 dark:bg-white/5 border-white/20 text-foreground"
+              }`}
+            >
+              Dark (Obsidian)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectColorPalette("deep")}
+              className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all text-center ${
+                colorPalette === "deep"
+                  ? "bg-indigo-950 text-indigo-100 border-indigo-700 shadow-md ring-2 ring-primary"
+                  : "bg-white/40 dark:bg-white/5 border-white/20 text-foreground"
+              }`}
+            >
+              Deep (Midnight)
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* SECTION 2: Replace Cover Artwork on Any Library Track */}

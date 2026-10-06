@@ -214,6 +214,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Equalizer State with persistent presets
   const [eqPreset, setEqPresetState] = useState<EqPreset>("Flat");
+  const eqPresetRef = useRef<EqPreset>("Flat");
   const [savedPresetGains, setSavedPresetGains] = useState<Record<EqPreset, number[]>>(() => ({
     Flat: [...EQ_PRESETS.Flat],
     "Bass Boost": [...EQ_PRESETS["Bass Boost"]],
@@ -222,8 +223,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     Rock: [...EQ_PRESETS.Rock],
     Electronic: [...EQ_PRESETS.Electronic],
   }));
+  const savedPresetGainsRef = useRef<Record<EqPreset, number[]>>({
+    Flat: [...EQ_PRESETS.Flat],
+    "Bass Boost": [...EQ_PRESETS["Bass Boost"]],
+    Vocal: [...EQ_PRESETS.Vocal],
+    Acoustic: [...EQ_PRESETS.Acoustic],
+    Rock: [...EQ_PRESETS.Rock],
+    Electronic: [...EQ_PRESETS.Electronic],
+  });
   const [eqGains, setEqGains] = useState<number[]>([...EQ_PRESETS.Flat]);
   const [stemMode, setStemModeState] = useState<"normal" | "vocals-only" | "beats-only">("normal");
+
+  // Session-only current song custom EQ overrides
+  const [currentSongEqMap, setCurrentSongEqMap] = useState<Record<string, number[]>>({});
+  const currentSongEqMapRef = useRef<Record<string, number[]>>({});
 
   const decks = useRef<HTMLAudioElement[]>([]);
   const active = useRef(0);
@@ -233,11 +246,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // Web Audio Context & Biquad Filter Chains
   const audioCtxRef = useRef<AudioContext | null>(null);
   const filterChainsRef = useRef<BiquadFilterNode[][]>([]);
+  const sourceNodesRef = useRef<MediaElementAudioSourceNode[]>([]);
+  const limiterNodeRef = useRef<DynamicsCompressorNode | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
 
   const stateRef = useRef({ queue, index, library, crossfade, mixMode, repeat, volume, eqGains });
   stateRef.current = { queue, index, library, crossfade, mixMode, repeat, volume, eqGains };
 
   const current = library.find((t) => t.id === queue[index]);
+  const currentRef = useRef<Track | undefined>(current);
+  currentRef.current = current;
+
+  const goToRef = useRef<(i: number, fadeSeconds?: number) => void>(() => {});
 
   // Load persistent library from IndexedDB on mount
   useEffect(() => {
@@ -288,134 +308,219 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Initialize Web Audio Filter Chain
-  const initAudioNodes = useCallback(() => {
-    if (audioCtxRef.current || typeof window === "undefined") return;
+  // Ensure Web Audio Context, Master Gain, and 10-band Biquad Filter Chains are attached to decks
+  const ensureAudioNodes = useCallback(() => {
+    if (typeof window === "undefined") return;
+
     const AudioContextClass =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
 
-    try {
-      const ctx = new AudioContextClass();
-      audioCtxRef.current = ctx;
+    let ctx = audioCtxRef.current;
+    if (!ctx) {
+      try {
+        ctx = new AudioContextClass();
+        audioCtxRef.current = ctx;
 
-      decks.current.forEach((audioEl, deckIdx) => {
-        try {
-          const source = ctx.createMediaElementSource(audioEl);
-          const filters = EQ_FREQUENCIES.map((freq, i) => {
-            const filter = ctx.createBiquadFilter();
-            if (i === 0) {
-              filter.type = "lowshelf";
-            } else if (i === EQ_FREQUENCIES.length - 1) {
-              filter.type = "highshelf";
-            } else {
-              filter.type = "peaking";
-              filter.Q.value = 1.4;
-            }
-            filter.frequency.value = freq;
-            filter.gain.value = stateRef.current.eqGains[i] || 0;
-            return filter;
-          });
+        const masterGain = ctx.createGain();
+        masterGain.gain.value = 1.0;
+        masterGainRef.current = masterGain;
 
-          // Chain filters: source -> filter0 -> filter1 ... -> destination
-          source.connect(filters[0]!);
-          for (let f = 0; f < filters.length - 1; f++) {
-            filters[f]!.connect(filters[f + 1]!);
-          }
-          filters[filters.length - 1]!.connect(ctx.destination);
-
-          if (!filterChainsRef.current[deckIdx]) {
-            filterChainsRef.current[deckIdx] = filters;
-          }
-        } catch {
-          // Audio routing in test or locked environment
-        }
-      });
-    } catch {
-      // AudioContext not allowed or mock
+        masterGain.connect(ctx.destination);
+      } catch (err) {
+        console.warn("Failed to create AudioContext:", err);
+        return;
+      }
     }
-  }, []);
 
-  // Session-only current song custom EQ overrides
-  const [currentSongEqMap, setCurrentSongEqMap] = useState<Record<string, number[]>>({});
+    if (ctx.state === "suspended") {
+      void ctx.resume().catch(() => {});
+    }
+
+    const masterGain = masterGainRef.current;
+    if (!masterGain) return;
+
+    // Ensure decks exist
+    if (!decks.current || decks.current.length === 0) {
+      const make = () => {
+        const a = new Audio();
+        a.preload = "auto";
+        return a;
+      };
+      decks.current = [make(), make()];
+    }
+
+    // Connect any deck that has not yet been connected to its filter chain
+    decks.current.forEach((audioEl, deckIdx) => {
+      if (sourceNodesRef.current[deckIdx]) {
+        // Already connected
+        return;
+      }
+
+      try {
+        const source = ctx.createMediaElementSource(audioEl);
+        sourceNodesRef.current[deckIdx] = source;
+
+        const initialGains = stateRef.current.eqGains;
+        const filters = EQ_FREQUENCIES.map((freq, i) => {
+          const filter = ctx.createBiquadFilter();
+          if (i === 0) {
+            filter.type = "lowshelf";
+          } else if (i === EQ_FREQUENCIES.length - 1) {
+            filter.type = "highshelf";
+          } else {
+            filter.type = "peaking";
+            filter.Q.value = 1.414;
+          }
+          filter.frequency.value = freq;
+          const g = typeof initialGains[i] === "number" ? initialGains[i]! : 0;
+          filter.gain.value = g;
+          return filter;
+        });
+
+        // Chain: source -> filter0 -> filter1 ... -> filter9 -> masterGain -> destination
+        source.connect(filters[0]!);
+        for (let f = 0; f < filters.length - 1; f++) {
+          filters[f]!.connect(filters[f + 1]!);
+        }
+        filters[filters.length - 1]!.connect(masterGain);
+
+        filterChainsRef.current[deckIdx] = filters;
+      } catch (e) {
+        console.warn("Could not attach Web Audio filter chain to deck", deckIdx, e);
+      }
+    });
+  }, []);
 
   const applyGainsToAudioChain = useCallback((gains: number[]) => {
+    ensureAudioNodes();
+    const ctx = audioCtxRef.current;
+    if (ctx && ctx.state === "suspended") {
+      void ctx.resume().catch(() => {});
+    }
+
     filterChainsRef.current.forEach((chain) => {
+      if (!chain) return;
       chain.forEach((filter, i) => {
         if (filter && typeof gains[i] === "number") {
-          filter.gain.value = gains[i]!;
+          const targetGain = gains[i]!;
+          try {
+            filter.gain.cancelScheduledValues(0);
+            filter.gain.value = targetGain;
+            if (ctx && ctx.currentTime > 0) {
+              filter.gain.setValueAtTime(targetGain, ctx.currentTime);
+            }
+          } catch {
+            filter.gain.value = targetGain;
+          }
         }
       });
     });
-  }, []);
+  }, [ensureAudioNodes]);
 
-  const setEqPreset = useCallback((preset: EqPreset) => {
-    setEqPresetState(preset);
-    const gains = savedPresetGains[preset] || EQ_PRESETS[preset] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    setEqGains([...gains]);
-    applyGainsToAudioChain(gains);
-  }, [savedPresetGains, applyGainsToAudioChain]);
+  const setEqPreset = useCallback(
+    (preset: EqPreset) => {
+      ensureAudioNodes();
+      setEqPresetState(preset);
+      eqPresetRef.current = preset;
+      const gains = savedPresetGainsRef.current[preset] || [...EQ_PRESETS[preset]];
+      setEqGains([...gains]);
+      stateRef.current.eqGains = [...gains];
+      applyGainsToAudioChain(gains);
+    },
+    [ensureAudioNodes, applyGainsToAudioChain],
+  );
 
-  const setEqGain = useCallback((bandIndex: number, gain: number) => {
-    // Preserve current preset without reverting to Flat!
-    setEqGains((prev) => {
-      const next = [...prev];
-      next[bandIndex] = gain;
-      applyGainsToAudioChain(next);
-      return next;
-    });
-    setSavedPresetGains((prev) => {
-      const presetArr = prev[eqPreset]
-        ? [...prev[eqPreset]]
-        : [...(EQ_PRESETS[eqPreset] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])];
-      presetArr[bandIndex] = gain;
-      return {
-        ...prev,
-        [eqPreset]: presetArr,
-      };
-    });
-  }, [eqPreset, applyGainsToAudioChain]);
+  const setEqGain = useCallback(
+    (bandIndex: number, gain: number) => {
+      ensureAudioNodes();
+      const currentPreset = eqPresetRef.current;
+
+      setEqGains((prev) => {
+        const next = [...prev];
+        next[bandIndex] = gain;
+        stateRef.current.eqGains = next;
+        applyGainsToAudioChain(next);
+        return next;
+      });
+
+      setSavedPresetGains((prev) => {
+        const currentCurve = prev[currentPreset]
+          ? [...prev[currentPreset]]
+          : [...(EQ_PRESETS[currentPreset] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])];
+        currentCurve[bandIndex] = gain;
+        const updated = {
+          ...prev,
+          [currentPreset]: currentCurve,
+        };
+        savedPresetGainsRef.current = updated;
+        return updated;
+      });
+    },
+    [ensureAudioNodes, applyGainsToAudioChain],
+  );
 
   const resetEqToDefault = useCallback(() => {
-    const defaultGains = [...EQ_PRESETS[eqPreset]];
-    setSavedPresetGains((prev) => ({
-      ...prev,
-      [eqPreset]: [...defaultGains],
-    }));
-    setEqGains([...defaultGains]);
-    applyGainsToAudioChain(defaultGains);
-    if (current?.id) {
+    ensureAudioNodes();
+    const currentPreset = eqPresetRef.current;
+    const factoryDefaults = [...EQ_PRESETS[currentPreset]];
+
+    setSavedPresetGains((prev) => {
+      const updated = {
+        ...prev,
+        [currentPreset]: [...factoryDefaults],
+      };
+      savedPresetGainsRef.current = updated;
+      return updated;
+    });
+
+    setEqGains([...factoryDefaults]);
+    stateRef.current.eqGains = [...factoryDefaults];
+    applyGainsToAudioChain(factoryDefaults);
+
+    if (currentRef.current?.id) {
       setCurrentSongEqMap((prev) => {
         const next = { ...prev };
-        delete next[current.id];
+        delete next[currentRef.current!.id];
+        currentSongEqMapRef.current = next;
         return next;
       });
     }
-  }, [eqPreset, current?.id, applyGainsToAudioChain]);
+  }, [ensureAudioNodes, applyGainsToAudioChain]);
 
   const saveCurrentSongEq = useCallback(() => {
-    if (!current?.id) return;
-    setCurrentSongEqMap((prev) => ({
-      ...prev,
-      [current.id]: [...eqGains],
-    }));
-  }, [current?.id, eqGains]);
+    const activeTrack = currentRef.current;
+    if (!activeTrack?.id) return;
+    const gainsToSave = [...stateRef.current.eqGains];
+    setCurrentSongEqMap((prev) => {
+      const updated = {
+        ...prev,
+        [activeTrack.id]: gainsToSave,
+      };
+      currentSongEqMapRef.current = updated;
+      return updated;
+    });
+  }, []);
 
-  const setStemMode = useCallback((mode: "normal" | "vocals-only" | "beats-only") => {
-    setStemModeState(mode);
-    if (mode === "vocals-only") {
-      // Isolate vocal frequencies: attenuate sub-bass and ultra-highs, boost mids
-      const vocalGains = [-14, -12, -6, 2, 6, 6, 4, 0, -6, -14];
-      applyGainsToAudioChain(vocalGains);
-    } else if (mode === "beats-only") {
-      // Attenuate mid vocal range (300Hz-3kHz), boost punchy low end and hi-hats
-      const beatGains = [8, 7, 5, 0, -14, -16, -12, 2, 5, 4];
-      applyGainsToAudioChain(beatGains);
-    } else {
-      applyGainsToAudioChain(eqGains);
-    }
-  }, [applyGainsToAudioChain, eqGains]);
+  const setStemMode = useCallback(
+    (mode: "normal" | "vocals-only" | "beats-only") => {
+      ensureAudioNodes();
+      setStemModeState(mode);
+      if (mode === "vocals-only") {
+        // Isolate vocal frequencies: attenuate sub-bass and ultra-highs, boost mids
+        const vocalGains = [-12, -10, -5, 3, 5, 5, 3, 0, -5, -12];
+        applyGainsToAudioChain(vocalGains);
+      } else if (mode === "beats-only") {
+        // Attenuate mid vocal range (300Hz-3kHz), boost punchy low end and hi-hats
+        const beatGains = [7, 6, 4, 0, -12, -14, -10, 2, 4, 3];
+        applyGainsToAudioChain(beatGains);
+      } else {
+        applyGainsToAudioChain(stateRef.current.eqGains);
+      }
+    },
+    [ensureAudioNodes, applyGainsToAudioChain],
+  );
 
   const exportStemTrack = useCallback(async (track: Track, mode: "vocals-only" | "beats-only"): Promise<Track> => {
     const res = await fetch(track.url);
@@ -508,9 +613,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const loadOnDeck = useCallback(
     (track: Track, fadeSeconds: number) => {
-      initAudioNodes();
+      ensureAudioNodes();
       if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
-        void audioCtxRef.current.resume();
+        void audioCtxRef.current.resume().catch(() => {});
       }
 
       const d = decks.current;
@@ -571,7 +676,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
       setPlaying(true);
     },
-    [initAudioNodes],
+    [ensureAudioNodes],
   );
 
   const goTo = useCallback(
@@ -602,29 +707,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       });
 
       // Apply song-specific session EQ if user temporarily adjusted and saved it
-      if (currentSongEqMap[t.id]) {
-        const songGains = currentSongEqMap[t.id]!;
+      if (currentSongEqMapRef.current[t.id]) {
+        const songGains = currentSongEqMapRef.current[t.id]!;
         setEqGains([...songGains]);
+        stateRef.current.eqGains = [...songGains];
         applyGainsToAudioChain(songGains);
       } else {
-        const presetGains = savedPresetGains[eqPreset] || EQ_PRESETS[eqPreset];
+        const activePreset = eqPresetRef.current;
+        const presetGains = savedPresetGainsRef.current[activePreset] || EQ_PRESETS[activePreset];
         setEqGains([...presetGains]);
+        stateRef.current.eqGains = [...presetGains];
         applyGainsToAudioChain(presetGains);
       }
     },
-    [loadOnDeck, currentSongEqMap, savedPresetGains, eqPreset, applyGainsToAudioChain],
+    [loadOnDeck, applyGainsToAudioChain],
   );
+  goToRef.current = goTo;
 
   useEffect(() => {
-    const make = () => {
-      const a = new Audio();
-      a.preload = "auto";
-      return a;
-    };
-    decks.current = [make(), make()];
+    if (!decks.current || decks.current.length === 0) {
+      const make = () => {
+        const a = new Audio();
+        a.preload = "auto";
+        return a;
+      };
+      decks.current = [make(), make()];
+    }
+    ensureAudioNodes();
 
     const tick = () => {
       const a = decks.current[active.current]!;
+      if (!a) return;
       setTime(a.currentTime);
       setDuration(isFinite(a.duration) ? a.duration : 0);
 
@@ -658,7 +771,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         a.duration - a.currentTime <= transition &&
         (index + 1 < stateRef.current.queue.length || stateRef.current.repeat)
       ) {
-        goTo(index + 1, transition);
+        goToRef.current(index + 1, transition);
       }
     };
 
@@ -670,7 +783,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (e.target === decks.current[active.current] && !fading.current) {
-        goTo(stateRef.current.index + 1);
+        goToRef.current(stateRef.current.index + 1);
       }
     };
 
@@ -683,7 +796,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
       decks.current.forEach((a) => a.pause());
     };
-  }, [goTo]);
+  }, [ensureAudioNodes]);
 
   // MediaSession API Bindings
   useEffect(() => {
@@ -718,11 +831,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
 
     navigator.mediaSession.setActionHandler("nexttrack", () => {
-      goTo(stateRef.current.index + 1, 0);
+      goToRef.current(stateRef.current.index + 1, 0);
     });
 
     navigator.mediaSession.setActionHandler("previoustrack", () => {
-      goTo(stateRef.current.index - 1, 0);
+      goToRef.current(stateRef.current.index - 1, 0);
     });
 
     navigator.mediaSession.setActionHandler("seekto", (details) => {
@@ -745,7 +858,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const a = decks.current[active.current];
       if (a) a.currentTime = Math.max(0, a.currentTime - (details.seekOffset || 10));
     });
-  }, [current, goTo]);
+  }, [current]);
 
   useEffect(() => {
     if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
@@ -807,12 +920,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setPlaying(false);
         }
       } else if (action === "next") {
-        goTo(stateRef.current.index + 1, 0);
+        goToRef.current(stateRef.current.index + 1, 0);
       } else if (action === "prev") {
         if (curDeck && curDeck.currentTime > 3) {
           curDeck.currentTime = 0;
         } else {
-          goTo(stateRef.current.index - 1, 0);
+          goToRef.current(stateRef.current.index - 1, 0);
         }
       } else if (action === "seek" && typeof position === "number") {
         if (curDeck) {
@@ -826,7 +939,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [goTo]);
+  }, []);
 
   // Real ID3 extraction pipeline
   const addFiles = async (files: FileList | File[]): Promise<number> => {
@@ -865,6 +978,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const playTrack = (id: string, list?: string[]) => {
+    ensureAudioNodes();
     let q = list ?? library.map((t) => t.id);
     if (shuffle) q = [id, ...q.filter((x) => x !== id).sort(() => Math.random() - 0.5)];
     setQueue(q);
@@ -873,7 +987,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const toggle = () => {
-    initAudioNodes();
+    ensureAudioNodes();
     const a = decks.current[active.current]!;
     if (!a?.src) {
       if (library[0]) playTrack(library[0].id);

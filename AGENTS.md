@@ -17,4 +17,5 @@
 - Store Google account profiles in the Cloud profiles table while keeping audio and playlists on the device, because signing in must not silently upload personal music.
 - Read audio tags with the browser-native `music-metadata` package (not `music-metadata-browser`), because the old package's Node stream polyfills crash the production bundle.
 
-- Keep the Capacitor Android shell pointed at the published app and avoid claiming native media controls until a tested foreground playback service exists, because Web Media Session alone does not guarantee Android background playback.
+
+- Build the Android APK from `src/capacitor-main.tsx` (hash history, own root) via `vite.capacitor.config.ts` into `dist-capacitor/`, and route `/api` calls through `getApiUrl()`, because Capacitor has no local server and browser history breaks under the native scheme; don't claim native media controls until a tested foreground playback service exists.

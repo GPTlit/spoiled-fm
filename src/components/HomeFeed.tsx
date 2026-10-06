@@ -16,6 +16,14 @@ import {
   ExternalLink,
   Youtube,
   RadioTower,
+  Guitar,
+  Zap,
+  Orbit,
+  MicVocal,
+  Piano,
+  Coffee,
+  AudioWaveform,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SeamlessSlideTrack } from "@/components/SeamlessSlideTrack";
@@ -35,26 +43,40 @@ interface HomeFeedProps {
   }) => void;
 }
 
+// Saxophone isn't in the icon set, so draw a matching line icon.
+function Saxophone({ className, strokeWidth = 1.75 }: { className?: string; strokeWidth?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M8 2h4" />
+      <path d="M10 2v3l3 2v9a4 4 0 0 1-8 0v-1" />
+      <path d="M5 15h3" />
+      <path d="M13 16a5 5 0 0 0 7-1l1-3h-4" />
+      <circle cx="13" cy="10" r=".6" fill="currentColor" />
+      <circle cx="13" cy="13" r=".6" fill="currentColor" />
+    </svg>
+  );
+}
+
 // Clean library styling for genres (fluid liquid glass matching the local library)
-const GENRES = [
-  { name: "Jazz", query: "best jazz music full album", count: "128 tracks", icon: "🎷" },
-  { name: "Blues", query: "classic blues music legends", count: "94 tracks", icon: "🎸" },
-  { name: "Synthwave", query: "synthwave retro chill electro", count: "112 tracks", icon: "⚡" },
-  { name: "Ambient", query: "deep ambient space immersion", count: "76 tracks", icon: "🌌" },
-  { name: "R&B / Soul", query: "neo soul r&b chill session", count: "145 tracks", icon: "🎙️" },
+const GENRES: { name: string; query: string; count: string; Icon: LucideIcon | typeof Saxophone }[] = [
+  { name: "Jazz", query: "best jazz music full album", count: "128 tracks", Icon: Saxophone },
+  { name: "Blues", query: "classic blues music legends", count: "94 tracks", Icon: Guitar },
+  { name: "Synthwave", query: "synthwave retro chill electro", count: "112 tracks", Icon: Zap },
+  { name: "Ambient", query: "deep ambient space immersion", count: "76 tracks", Icon: Orbit },
+  { name: "R&B / Soul", query: "neo soul r&b chill session", count: "145 tracks", Icon: MicVocal },
   {
     name: "Classical",
     query: "classical piano violin masterpieces",
     count: "88 tracks",
-    icon: "🎻",
+    Icon: Piano,
   },
   {
     name: "Lo-Fi Beats",
     query: "lofi hip hop radio beats to relax study to",
     count: "210 tracks",
-    icon: "☕",
+    Icon: Coffee,
   },
-  { name: "Electronic", query: "electronic melodic techno house", count: "160 tracks", icon: "🎛️" },
+  { name: "Electronic", query: "electronic melodic techno house", count: "160 tracks", Icon: AudioWaveform },
 ];
 
 // REAL New Releases from top artists with actual YouTube video IDs
@@ -279,7 +301,7 @@ export function HomeFeed({
               className="group flex flex-col justify-between p-3.5 rounded-2xl bg-white/50 dark:bg-white/5 border border-white/50 dark:border-white/10 hover:bg-white/80 dark:hover:bg-white/10 transition-all text-left shadow-sm active:scale-[0.98]"
             >
               <div className="flex items-center justify-between w-full mb-3">
-                <span className="text-xl">{g.icon}</span>
+                <span className="genre-icon"><g.Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden /></span>
                 <span className="text-[10px] text-muted-foreground font-mono">{g.count}</span>
               </div>
               <div>

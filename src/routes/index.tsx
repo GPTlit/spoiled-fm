@@ -89,6 +89,13 @@ import {
   isNativeAndroidApp,
   importNativeAudioToLibrary,
 } from "@/lib/native-downloader";
+import {
+  isMediaStoreAvailable,
+  checkDeviceAudioPermission,
+  requestDeviceAudioPermission,
+  queryDeviceAudioFiles,
+  nativeTrackToPlayerTrack,
+} from "@/lib/native-mediastore";
 
 type Screen =
   | "home"
@@ -250,6 +257,78 @@ function MusicApp() {
       window.removeEventListener("mouseup", handleRelease);
     };
   }, [scrubbingTime]);
+
+  // Native Android MediaStore Audio State
+  const [nativeAudioPermission, setNativeAudioPermission] = useState<
+    "checking" | "granted" | "denied" | "prompt"
+  >("checking");
+  const [isScanningMediaStore, setIsScanningMediaStore] = useState(false);
+  const [mediaStoreScanCount, setMediaStoreScanCount] = useState<number | null>(null);
+
+  const scanDeviceMusic = useCallback(
+    async (showToast = false) => {
+      if (!isMediaStoreAvailable()) return;
+      setIsScanningMediaStore(true);
+      try {
+        const hasPermission = await checkDeviceAudioPermission();
+        if (!hasPermission) {
+          setNativeAudioPermission("prompt");
+          setIsScanningMediaStore(false);
+          return;
+        }
+        setNativeAudioPermission("granted");
+        const res = await queryDeviceAudioFiles();
+        if (res.success && res.tracks.length > 0) {
+          const playerTracks = res.tracks.map(nativeTrackToPlayerTrack);
+          p.addNativeTracks(playerTracks);
+          setMediaStoreScanCount(res.tracks.length);
+          if (showToast) {
+            setMessage(`Found ${res.tracks.length} songs stored on your device`);
+          }
+        } else if (res.error === "PERMISSION_DENIED") {
+          setNativeAudioPermission("denied");
+        } else if (res.success && res.tracks.length === 0 && showToast) {
+          setMessage("No audio files detected in device storage.");
+        }
+      } catch (err) {
+        console.warn("Scan device music error:", err);
+      } finally {
+        setIsScanningMediaStore(false);
+      }
+    },
+    [p],
+  );
+
+  // Automatic detection on startup for Android native app
+  useEffect(() => {
+    if (isMediaStoreAvailable()) {
+      void scanDeviceMusic(false);
+    }
+  }, [scanDeviceMusic]);
+
+  const handleRequestNativePermission = async () => {
+    setIsScanningMediaStore(true);
+    try {
+      const granted = await requestDeviceAudioPermission();
+      if (granted) {
+        setNativeAudioPermission("granted");
+        const res = await queryDeviceAudioFiles();
+        if (res.success) {
+          const playerTracks = res.tracks.map(nativeTrackToPlayerTrack);
+          p.addNativeTracks(playerTracks);
+          setMediaStoreScanCount(res.tracks.length);
+          setMessage(`Loaded ${res.tracks.length} songs from your device`);
+        }
+      } else {
+        setNativeAudioPermission("denied");
+        setMessage("Audio permission denied. Enable in Android Settings > Apps > Spoiled FM.");
+      }
+    } catch {
+      setNativeAudioPermission("denied");
+    } finally {
+      setIsScanningMediaStore(false);
+    }
+  };
 
   // AI Curator State
   const [aiText, setAiText] = useState("");
@@ -1707,41 +1786,65 @@ function MusicApp() {
                 </Button>
               </header>
 
-              {isNativeAndroidApp() && p.library.length === 0 && (
+              {/* Native Android MediaStore Audio Integration */}
+              {isMediaStoreAvailable() && (
                 <div className="p-4 mb-4 rounded-3xl bg-indigo-500/10 border border-indigo-500/25 backdrop-blur-xl flex flex-col gap-2.5">
-                  <div className="flex items-center gap-2 text-indigo-500 font-bold text-xs uppercase tracking-wider">
-                    <Volume2 className="h-4 w-4" /> Sound & Media Access
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-indigo-500 font-bold text-xs uppercase tracking-wider">
+                      <Music2 className="h-4 w-4" /> Native Device Music Library
+                    </div>
+                    {mediaStoreScanCount !== null && (
+                      <span className="text-[10px] font-mono text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        {mediaStoreScanCount} tracks
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Allow SPOILED to access your device's audio files so all songs from your phone storage appear in your library.
-                  </p>
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      className="h-9 px-4 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-                      onClick={async () => {
-                        try {
-                          if (navigator.mediaDevices?.getUserMedia) {
-                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            stream.getTracks().forEach((t) => t.stop());
-                          }
-                        } catch {
-                          /* ignore */
-                        }
-                        files.current?.click();
-                      }}
-                    >
-                      <Plus className="mr-1.5 h-3.5 w-3.5" /> Grant Access & Load Sound Files
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 px-3 text-xs rounded-xl"
-                      onClick={() => folder.current?.click()}
-                    >
-                      Scan Folder
-                    </Button>
-                  </div>
+
+                  {nativeAudioPermission === "denied" ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-rose-500 font-semibold leading-relaxed">
+                        Audio permission is disabled. SPOILED cannot read music on this device until permission is granted.
+                      </p>
+                      <Button
+                        size="sm"
+                        className="h-9 px-4 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white"
+                        onClick={handleRequestNativePermission}
+                        disabled={isScanningMediaStore}
+                      >
+                        Grant Audio Permission
+                      </Button>
+                    </div>
+                  ) : nativeAudioPermission === "granted" ? (
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-xs text-muted-foreground">
+                        Songs on your phone are automatically detected and playable.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-3 text-xs rounded-xl"
+                        onClick={() => scanDeviceMusic(true)}
+                        disabled={isScanningMediaStore}
+                      >
+                        {isScanningMediaStore ? "Scanning…" : "Re-Scan Device"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        SPOILED can automatically display music files already stored on your phone without uploading them.
+                      </p>
+                      <Button
+                        size="sm"
+                        className="h-9 px-4 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                        onClick={handleRequestNativePermission}
+                        disabled={isScanningMediaStore}
+                      >
+                        <Volume2 className="mr-1.5 h-3.5 w-3.5" />
+                        {isScanningMediaStore ? "Detecting Songs…" : "Allow & Discover My Music"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 

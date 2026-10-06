@@ -23,6 +23,8 @@ export interface Track {
   hue: number;
   pictureUrl?: string;
   hasEmbeddedPicture?: boolean;
+  contentUri?: string;
+  isNativeMediaStore?: boolean;
 }
 
 export type EqPreset = "Flat" | "Bass Boost" | "Vocal" | "Acoustic" | "Rock" | "Electronic";
@@ -122,6 +124,7 @@ interface Ctx {
   moveInQueue: (from: number, to: number) => void;
   toggleLike: (id: string) => void;
   deleteTrack: (id: string) => Promise<void>;
+  addNativeTracks: (tracks: Track[]) => void;
   exportBackup: () => Promise<string>;
   importBackup: (jsonStr: string) => Promise<boolean>;
   clearLibrary: () => Promise<void>;
@@ -726,6 +729,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const addNativeTracks = useCallback((incoming: Track[]) => {
+    setLibrary((prev) => {
+      const existing = new Set(prev.map((t) => t.id));
+      const fresh = incoming.filter((t) => !existing.has(t.id));
+      if (!fresh.length) return prev;
+      return [...prev, ...fresh];
+    });
+  }, []);
+
   return (
     <PlayerCtx.Provider
       value={{
@@ -746,6 +758,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setEqPreset,
         setEqGain,
         addFiles,
+        addNativeTracks,
         playTrack,
         toggle,
         next: () => goTo(index + 1, 0),

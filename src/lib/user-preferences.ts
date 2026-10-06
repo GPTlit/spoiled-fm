@@ -1,3 +1,5 @@
+import defaultAppLogo from "@/assets/images/spoiled_liquid_icon_1790935677985.jpg";
+
 export interface WatchedVideo {
   id: string;
   title: string;
@@ -149,6 +151,14 @@ export function setAppTitle(title: string) {
 export function getAppLogo(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(APP_LOGO_KEY);
+}
+
+export function getAppCoverLogo(): string {
+  if (typeof window !== "undefined") {
+    const userCustom = localStorage.getItem(APP_LOGO_KEY);
+    if (userCustom) return userCustom;
+  }
+  return defaultAppLogo;
 }
 
 export function setAppLogo(dataUrl: string) {

@@ -241,7 +241,7 @@ public class SpoiledMediaService extends Service {
 
         PlaybackState playbackState = new PlaybackState.Builder()
             .setActions(actions)
-            .setState(state, positionMs, 1.0f)
+            .setState(state, positionMs, mIsPlaying ? 1.0f : 0.0f)
             .build();
 
         mMediaSession.setPlaybackState(playbackState);
@@ -269,7 +269,13 @@ public class SpoiledMediaService extends Service {
             public void run() {
                 Bitmap bmp = null;
                 try {
-                    if (artUrl.startsWith("content://") || artUrl.startsWith("file://")) {
+                    if (artUrl.startsWith("data:image/") || artUrl.startsWith("data:application/")) {
+                        int comma = artUrl.indexOf(',');
+                        if (comma != -1) {
+                            byte[] decoded = android.util.Base64.decode(artUrl.substring(comma + 1), android.util.Base64.DEFAULT);
+                            bmp = BitmapFactory.decodeByteArray(decoded, 0, decoded.length);
+                        }
+                    } else if (artUrl.startsWith("content://") || artUrl.startsWith("file://")) {
                         Uri uri = Uri.parse(artUrl);
                         InputStream is = getContentResolver().openInputStream(uri);
                         if (is != null) {
@@ -342,6 +348,10 @@ public class SpoiledMediaService extends Service {
             nextPendingIntent
         ).build();
 
+        Intent deleteIntent = new Intent(this, SpoiledMediaService.class);
+        deleteIntent.setAction(ACTION_STOP);
+        PendingIntent deletePendingIntent = PendingIntent.getService(this, 105, deleteIntent, flag);
+
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             builder = new Notification.Builder(this, CHANNEL_ID);
@@ -360,7 +370,10 @@ public class SpoiledMediaService extends Service {
             .setContentText(mArtist)
             .setSubText("SPOILED FM")
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setColor(0xFF10B981)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
             .setContentIntent(contentPendingIntent)
+            .setDeleteIntent(deletePendingIntent)
             .setStyle(mediaStyle)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(mIsPlaying)

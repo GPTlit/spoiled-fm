@@ -13,6 +13,7 @@ import {
   stopNativePlayback,
   listenToNativeMediaCommands,
 } from "./native-mediasession";
+import { getAppCoverLogo, recordWatchedVideo } from "./user-preferences";
 
 export interface Track {
   id: string;
@@ -115,6 +116,7 @@ interface Ctx {
   addFiles: (files: FileList | File[]) => Promise<number>;
   playTrack: (id: string, list?: string[]) => void;
   toggle: () => void;
+  stopPlayback: () => void;
   next: () => void;
   prev: () => void;
   seek: (t: number) => void;
@@ -251,7 +253,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             const url = URL.createObjectURL(record.file);
             const pictureUrl = record.pictureBlob
               ? URL.createObjectURL(record.pictureBlob)
-              : undefined;
+              : getAppCoverLogo();
             return {
               id: record.id,
               title: record.title,
@@ -335,33 +337,173 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const setEqPreset = useCallback((preset: EqPreset) => {
-    setEqPresetState(preset);
-    const gains = EQ_PRESETS[preset];
-    if (gains) {
-      setEqGains([...gains]);
-      filterChainsRef.current.forEach((chain) => {
-        chain.forEach((filter, i) => {
-          if (filter && typeof gains[i] === "number") {
-            filter.gain.value = gains[i]!;
-          }
-        });
+  // Session-only current song custom EQ overrides
+  const [currentSongEqMap, setCurrentSongEqMap] = useState<Record<string, number[]>>({});
+
+  const applyGainsToAudioChain = useCallback((gains: number[]) => {
+    filterChainsRef.current.forEach((chain) => {
+      chain.forEach((filter, i) => {
+        if (filter && typeof gains[i] === "number") {
+          filter.gain.value = gains[i]!;
+        }
       });
-    }
+    });
   }, []);
 
+  const setEqPreset = useCallback((preset: EqPreset) => {
+    setEqPresetState(preset);
+    const gains = savedPresetGains[preset] || EQ_PRESETS[preset] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    setEqGains([...gains]);
+    applyGainsToAudioChain(gains);
+  }, [savedPresetGains, applyGainsToAudioChain]);
+
   const setEqGain = useCallback((bandIndex: number, gain: number) => {
-    setEqPresetState("Flat");
+    // Preserve current preset without reverting to Flat!
     setEqGains((prev) => {
       const next = [...prev];
       next[bandIndex] = gain;
-      filterChainsRef.current.forEach((chain) => {
-        if (chain[bandIndex]) {
-          chain[bandIndex]!.gain.value = gain;
-        }
-      });
+      applyGainsToAudioChain(next);
       return next;
     });
+    setSavedPresetGains((prev) => {
+      const presetArr = prev[eqPreset]
+        ? [...prev[eqPreset]]
+        : [...(EQ_PRESETS[eqPreset] || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])];
+      presetArr[bandIndex] = gain;
+      return {
+        ...prev,
+        [eqPreset]: presetArr,
+      };
+    });
+  }, [eqPreset, applyGainsToAudioChain]);
+
+  const resetEqToDefault = useCallback(() => {
+    const defaultGains = [...EQ_PRESETS[eqPreset]];
+    setSavedPresetGains((prev) => ({
+      ...prev,
+      [eqPreset]: [...defaultGains],
+    }));
+    setEqGains([...defaultGains]);
+    applyGainsToAudioChain(defaultGains);
+    if (current?.id) {
+      setCurrentSongEqMap((prev) => {
+        const next = { ...prev };
+        delete next[current.id];
+        return next;
+      });
+    }
+  }, [eqPreset, current?.id, applyGainsToAudioChain]);
+
+  const saveCurrentSongEq = useCallback(() => {
+    if (!current?.id) return;
+    setCurrentSongEqMap((prev) => ({
+      ...prev,
+      [current.id]: [...eqGains],
+    }));
+  }, [current?.id, eqGains]);
+
+  const setStemMode = useCallback((mode: "normal" | "vocals-only" | "beats-only") => {
+    setStemModeState(mode);
+    if (mode === "vocals-only") {
+      // Isolate vocal frequencies: attenuate sub-bass and ultra-highs, boost mids
+      const vocalGains = [-14, -12, -6, 2, 6, 6, 4, 0, -6, -14];
+      applyGainsToAudioChain(vocalGains);
+    } else if (mode === "beats-only") {
+      // Attenuate mid vocal range (300Hz-3kHz), boost punchy low end and hi-hats
+      const beatGains = [8, 7, 5, 0, -14, -16, -12, 2, 5, 4];
+      applyGainsToAudioChain(beatGains);
+    } else {
+      applyGainsToAudioChain(eqGains);
+    }
+  }, [applyGainsToAudioChain, eqGains]);
+
+  const exportStemTrack = useCallback(async (track: Track, mode: "vocals-only" | "beats-only"): Promise<Track> => {
+    const res = await fetch(track.url);
+    const arrayBuffer = await res.arrayBuffer();
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const tempCtx = new AudioContextClass();
+    const decoded = await tempCtx.decodeAudioData(arrayBuffer);
+    await tempCtx.close();
+
+    const sampleRate = decoded.sampleRate;
+    const length = decoded.length;
+    const numChannels = decoded.numberOfChannels;
+
+    const leftIn = decoded.getChannelData(0);
+    const rightIn = numChannels > 1 ? decoded.getChannelData(1) : leftIn;
+
+    const offlineCtx = new OfflineAudioContext(2, length, sampleRate);
+    const processedBuffer = offlineCtx.createBuffer(2, length, sampleRate);
+    const leftOut = processedBuffer.getChannelData(0);
+    const rightOut = processedBuffer.getChannelData(1);
+
+    if (mode === "vocals-only") {
+      // Center isolate (vocals)
+      for (let i = 0; i < length; i++) {
+        const mid = (leftIn[i]! + rightIn[i]!) * 0.5;
+        const side = (leftIn[i]! - rightIn[i]!) * 0.5;
+        const v = mid * 1.3 - side * 0.2;
+        leftOut[i] = v;
+        rightOut[i] = v;
+      }
+    } else {
+      // Beat isolate / vocal cancellation (L - R)
+      for (let i = 0; i < length; i++) {
+        const side = (leftIn[i]! - rightIn[i]!) * 0.6;
+        leftOut[i] = side;
+        rightOut[i] = -side;
+      }
+    }
+
+    const sourceNode = offlineCtx.createBufferSource();
+    sourceNode.buffer = processedBuffer;
+
+    if (mode === "vocals-only") {
+      const hp = offlineCtx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 260;
+      const lp = offlineCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 3600;
+      sourceNode.connect(hp);
+      hp.connect(lp);
+      lp.connect(offlineCtx.destination);
+    } else {
+      const bass = offlineCtx.createBiquadFilter();
+      bass.type = "lowshelf";
+      bass.frequency.value = 180;
+      bass.gain.value = 8;
+      sourceNode.connect(bass);
+      bass.connect(offlineCtx.destination);
+    }
+
+    sourceNode.start(0);
+    const rendered = await offlineCtx.startRendering();
+    const wavBlob = bufferToWave(rendered, rendered.length);
+
+    const suffix = mode === "vocals-only" ? "Vocals (Acapella)" : "Beats (Instrumental)";
+    const fileName = `${track.title} [${suffix}].wav`;
+    const newFile = new File([wavBlob], fileName, { type: "audio/wav" });
+    const newUrl = URL.createObjectURL(newFile);
+
+    const defaultCover = getAppCoverLogo();
+    const newTrack: Track = {
+      id: crypto.randomUUID(),
+      title: `${track.title} [${suffix}]`,
+      artist: track.artist,
+      album: `${track.album || "Spoiled"} (${suffix})`,
+      duration: rendered.duration,
+      url: newUrl,
+      pictureUrl: track.pictureUrl || defaultCover,
+      hasEmbeddedPicture: track.hasEmbeddedPicture,
+      hue: (track.hue + 45) % 360,
+    };
+
+    await saveTrackToIdb(newTrack, newFile);
+    setLibrary((prev) => [newTrack, ...prev]);
+    return newTrack;
   }, []);
 
   const loadOnDeck = useCallback(
@@ -449,8 +591,28 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!t) return;
       setIndex(n);
       loadOnDeck(t, fadeSeconds);
+
+      // Auto-record to monthly watch/listening history
+      recordWatchedVideo({
+        id: t.id,
+        title: t.title,
+        channel: t.artist,
+        thumbnail: t.pictureUrl || getAppCoverLogo(),
+        duration: fmt(t.duration || 0),
+      });
+
+      // Apply song-specific session EQ if user temporarily adjusted and saved it
+      if (currentSongEqMap[t.id]) {
+        const songGains = currentSongEqMap[t.id]!;
+        setEqGains([...songGains]);
+        applyGainsToAudioChain(songGains);
+      } else {
+        const presetGains = savedPresetGains[eqPreset] || EQ_PRESETS[eqPreset];
+        setEqGains([...presetGains]);
+        applyGainsToAudioChain(presetGains);
+      }
     },
-    [loadOnDeck],
+    [loadOnDeck, currentSongEqMap, savedPresetGains, eqPreset, applyGainsToAudioChain],
   );
 
   useEffect(() => {
@@ -591,6 +753,81 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [playing]);
 
+  // Synchronize playback state, metadata and artwork with Android MediaSession / Notification / Lock-Screen / Widget
+  useEffect(() => {
+    if (!current) {
+      void stopNativePlayback();
+      return;
+    }
+
+    void updateNativePlayback({
+      title: current.title,
+      artist: current.artist,
+      album: current.album,
+      duration: duration || current.duration || 0,
+      position: time || 0,
+      isPlaying: playing,
+      artworkUrl: current.pictureUrl || getAppCoverLogo(),
+    });
+  }, [current, playing, duration]);
+
+  // Periodic heartbeat during active playback to update progress in notification & widget
+  useEffect(() => {
+    if (!playing || !current) return;
+    const interval = setInterval(() => {
+      void updateNativePlayback({
+        title: current.title,
+        artist: current.artist,
+        album: current.album,
+        duration: duration || current.duration || 0,
+        position: time || 0,
+        isPlaying: true,
+        artworkUrl: current.pictureUrl || getAppCoverLogo(),
+      });
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [playing, current, duration, time]);
+
+  // Handle incoming control commands from Android system media controls, lock screen, and home-screen widget
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void listenToNativeMediaCommands((info) => {
+      const { action, position } = info;
+      const d = decks.current;
+      const curDeck = d[active.current];
+
+      if (action === "play") {
+        if (curDeck) {
+          void curDeck.play().catch(() => {});
+          setPlaying(true);
+        }
+      } else if (action === "pause") {
+        if (curDeck) {
+          curDeck.pause();
+          setPlaying(false);
+        }
+      } else if (action === "next") {
+        goTo(stateRef.current.index + 1, 0);
+      } else if (action === "prev") {
+        if (curDeck && curDeck.currentTime > 3) {
+          curDeck.currentTime = 0;
+        } else {
+          goTo(stateRef.current.index - 1, 0);
+        }
+      } else if (action === "seek" && typeof position === "number") {
+        if (curDeck) {
+          curDeck.currentTime = Math.max(0, Math.min(position, curDeck.duration || position));
+        }
+      }
+    }).then((unsub) => {
+      cleanup = unsub;
+    });
+
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [goTo]);
+
   // Real ID3 extraction pipeline
   const addFiles = async (files: FileList | File[]): Promise<number> => {
     const list = Array.from(files).filter(
@@ -603,6 +840,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     for (const file of list) {
       const meta = await extractAudioMetadata(file);
       const url = URL.createObjectURL(file);
+      const defaultCover = getAppCoverLogo();
       const track: Track = {
         id: crypto.randomUUID(),
         title: meta.title,
@@ -613,7 +851,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         trackNumber: meta.trackNumber,
         duration: meta.duration,
         url,
-        pictureUrl: meta.pictureUrl,
+        pictureUrl: meta.pictureUrl || defaultCover,
         hasEmbeddedPicture: Boolean(meta.pictureBlob),
         hue: Math.floor(Math.random() * 60) + 20,
       };
@@ -649,6 +887,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setPlaying(false);
     }
   };
+
+  const stopPlayback = useCallback(() => {
+    if (fadeFrame.current !== null) cancelAnimationFrame(fadeFrame.current);
+    fadeFrame.current = null;
+    fading.current = false;
+    decks.current.forEach((a) => {
+      try {
+        a.pause();
+        a.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    });
+    setPlaying(false);
+    void stopNativePlayback();
+  }, []);
 
   // Export metadata & playlist backup to JSON
   const exportBackup = async (): Promise<string> => {
@@ -797,9 +1051,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const addNativeTracks = useCallback((incoming: Track[]) => {
+    const defaultCover = getAppCoverLogo();
     setLibrary((prev) => {
       const existing = new Set(prev.map((t) => t.id));
-      const fresh = incoming.filter((t) => !existing.has(t.id));
+      const fresh = incoming
+        .filter((t) => !existing.has(t.id))
+        .map((t) => ({ ...t, pictureUrl: t.pictureUrl || defaultCover }));
       if (!fresh.length) return prev;
       return [...prev, ...fresh];
     });
@@ -824,10 +1081,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         eqGains,
         setEqPreset,
         setEqGain,
+        resetEqToDefault,
+        saveCurrentSongEq,
+        stemMode,
+        setStemMode,
+        exportStemTrack,
         addFiles,
         addNativeTracks,
         playTrack,
         toggle,
+        stopPlayback,
         next: () => goTo(index + 1, 0),
         prev: () => (time > 3 ? (decks.current[active.current]!.currentTime = 0) : goTo(index - 1, 0)),
         seek: (t) => {

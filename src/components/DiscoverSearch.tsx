@@ -38,6 +38,9 @@ import {
   recordSearchTerm,
   getFrequentSearchTerms,
   recordWatchedVideo,
+  getWatchHistory,
+  clearWatchHistory,
+  type WatchedVideo,
 } from "@/lib/user-preferences";
 import {
   ARTIST_PROFILES,
@@ -129,6 +132,13 @@ export function DiscoverSearch({
     live: false,
   });
 
+  // Related Recommendations Under Currently Selected Video
+  const [relatedVideoRecs, setRelatedVideoRecs] = useState<VideoResult[]>([]);
+  const [loadingRelated, setLoadingRelated] = useState(false);
+
+  // Monthly Auto-Cleaning Watch History
+  const [watchHistory, setWatchHistory] = useState<WatchedVideo[]>(() => getWatchHistory());
+
   interface SpeechRecognitionResultItem {
     transcript: string;
   }
@@ -156,6 +166,57 @@ export function DiscoverSearch({
   // Only display a video container if a video has been selected by user!
   const currentVideo: VideoResult | null = activeVideo || internalVideo || null;
 
+  // When a video is selected, immediately find tailored related tracks
+  useEffect(() => {
+    if (!currentVideo) {
+      setRelatedVideoRecs([]);
+      return;
+    }
+    let alive = true;
+    setLoadingRelated(true);
+
+    const loadRelated = async () => {
+      try {
+        const queryTerm = `${currentVideo.channel} ${currentVideo.title}`
+          .replace(/official|music|video|audio|lyrics|hd|4k|[^\w\s]/gi, " ")
+          .trim();
+        const res = await fetch(
+          `${API_URL}/api/video/related?q=${encodeURIComponent(queryTerm)}&id=${encodeURIComponent(currentVideo.id)}`,
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { videos?: VideoResult[] };
+          if (alive && data.videos && data.videos.length > 0) {
+            setRelatedVideoRecs(data.videos.slice(0, 8));
+            setLoadingRelated(false);
+            return;
+          }
+        }
+      } catch {
+        // fallback
+      }
+
+      if (alive) {
+        const matchedProfile = ARTIST_PROFILES[currentVideo.channel];
+        if (matchedProfile && matchedProfile.featuredVideos.length > 0) {
+          setRelatedVideoRecs(
+            matchedProfile.featuredVideos.filter((v) => v.id !== currentVideo.id).slice(0, 8),
+          );
+        } else {
+          const fallback = getFreshRecommendations("All", 8).filter(
+            (v) => v.id !== currentVideo.id,
+          );
+          setRelatedVideoRecs(fallback.slice(0, 8));
+        }
+        setLoadingRelated(false);
+      }
+    };
+
+    void loadRelated();
+    return () => {
+      alive = false;
+    };
+  }, [currentVideo?.id]);
+
   // Sync external artist selection from props
   useEffect(() => {
     if (externalArtist) {
@@ -165,6 +226,7 @@ export function DiscoverSearch({
 
   useEffect(() => {
     setFrequentTerms(getFrequentSearchTerms());
+    setWatchHistory(getWatchHistory());
   }, []);
 
   const triggerSearch = useCallback(async (term: string) => {
@@ -519,6 +581,7 @@ export function DiscoverSearch({
     setInternalVideo(vid);
     setIsPlaying(true);
     recordWatchedVideo(vid);
+    setWatchHistory(getWatchHistory());
     onSelectVideo(vid);
   };
 
@@ -564,18 +627,40 @@ export function DiscoverSearch({
     onSelectArtist?.(null);
   };
 
+  const parseDurationSec = (d?: string): number => {
+    if (!d) return 0;
+    const parts = d.split(":").map((x) => parseInt(x, 10) || 0);
+    if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
+    if (parts.length === 2) return parts[0]! * 60 + parts[1]!;
+    return parts[0] || 0;
+  };
+
   // Filter video results locally according to active filter options
   const filteredResults = results.filter((item) => {
-    if (filterDuration === "short" && item.duration) {
-      const [m] = item.duration.split(":").map(Number);
-      if (m >= 4) return false;
-    }
-    if (filterDuration === "long" && item.duration) {
-      const [m] = item.duration.split(":").map(Number);
-      if (m < 20) return false;
-    }
-    if (filterFeatures.live && !item.title.toLowerCase().includes("live")) {
+    const sec = parseDurationSec(item.duration);
+    if (filterDuration === "short" && sec > 0 && sec >= 240) {
       return false;
+    }
+    if (filterDuration === "medium" && sec > 0 && (sec < 240 || sec > 1200)) {
+      return false;
+    }
+    if (filterDuration === "long" && sec > 0 && sec < 1200) {
+      return false;
+    }
+    if (filterFeatures.live && !/live|concert|stream|session/i.test(item.title)) {
+      return false;
+    }
+    if (filterUploadDate !== "any") {
+      const titleLower = item.title.toLowerCase();
+      if (filterUploadDate === "today" && !/today|hour|live|stream/i.test(titleLower)) {
+        return false;
+      }
+      if (filterUploadDate === "week" && !/day|week|new|2026/i.test(titleLower)) {
+        return false;
+      }
+      if (filterUploadDate === "month" && !/month|week|new|2026|latest/i.test(titleLower)) {
+        return false;
+      }
     }
     return true;
   });
@@ -921,6 +1006,80 @@ export function DiscoverSearch({
               )}
             </div>
           </div>
+
+          {/* Related Recommendations Underneath Selected Video */}
+          <div className="p-3.5 bg-card/90 border-t border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-emerald-500" />
+                <h3 className="text-sm font-bold text-foreground">
+                  Recommendations for "{currentVideo.title}"
+                </h3>
+              </div>
+              {loadingRelated && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1 font-mono">
+                  <Loader2 className="h-3 w-3 animate-spin text-emerald-500" /> Finding related tracks…
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+              {relatedVideoRecs.map((rec) => (
+                <div
+                  key={`rel-${rec.id}`}
+                  onClick={() => handlePlayVideo(rec)}
+                  className="group flex gap-2.5 p-2 rounded-none bg-muted/40 hover:bg-muted border border-border/70 transition-all cursor-pointer"
+                >
+                  <div className="relative w-28 aspect-video shrink-0 bg-black rounded-none overflow-hidden border border-border/40">
+                    <img
+                      src={rec.thumbnail}
+                      alt={rec.title}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    {rec.duration && (
+                      <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 bg-black/85 font-mono text-[9px] text-white">
+                        {rec.duration}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 pr-1 flex flex-col justify-between">
+                    <div>
+                      <strong className="block text-xs font-semibold text-foreground line-clamp-2 group-hover:text-primary transition-colors">
+                        {rec.title}
+                      </strong>
+                      <span className="text-[11px] text-muted-foreground block truncate mt-0.5">
+                        {rec.channel}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePlayVideo(rec);
+                        }}
+                        className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1"
+                      >
+                        <Play className="h-3 w-3 fill-current" /> Play
+                      </button>
+                      {onOpenDownloadModal && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenDownloadModal(rec, "audio");
+                          }}
+                          className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                          title="Download Audio"
+                        >
+                          <Download className="h-3 w-3" /> Audio
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1041,10 +1200,10 @@ export function DiscoverSearch({
               <div
                 key={item.id}
                 onClick={() => handlePlayVideo(item)}
-                className="discover-card group flex flex-col p-2 gap-2 rounded-2xl bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs"
+                className="discover-card group flex flex-col p-2 gap-2 rounded-none bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs"
               >
                 <div className="flex flex-col gap-2 min-w-0">
-                  <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black shadow-xs">
+                  <div className="relative w-full aspect-video rounded-none overflow-hidden bg-black shadow-xs border border-border/40">
                     <img
                       src={item.thumbnail}
                       alt={item.title}
@@ -1055,7 +1214,7 @@ export function DiscoverSearch({
                       <Play className="h-4 w-4 fill-white text-white" />
                     </div>
                     {item.duration && (
-                      <span className="absolute bottom-0.5 right-1 px-1 py-0.2 rounded bg-black/80 font-mono text-[9px] text-white">
+                      <span className="absolute bottom-0.5 right-1 px-1 py-0.2 rounded-none bg-black/80 font-mono text-[9px] text-white">
                         {item.duration}
                       </span>
                     )}
@@ -1136,10 +1295,10 @@ export function DiscoverSearch({
                 <div
                   key={`rec-${item.id}`}
                   onClick={() => handlePlayVideo(item)}
-                  className="discover-card group flex flex-col p-2 gap-2 rounded-2xl bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs hover:border-primary/50"
+                  className="discover-card group flex flex-col p-2 gap-2 rounded-none bg-card hover:bg-accent border border-border transition-all cursor-pointer shadow-xs hover:border-primary/50"
                 >
                   <div className="flex flex-col gap-2 min-w-0">
-                    <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black shadow-xs">
+                    <div className="relative w-full aspect-video rounded-none overflow-hidden bg-black shadow-xs border border-border/40">
                       <img
                         src={item.thumbnail}
                         alt={item.title}
@@ -1150,7 +1309,7 @@ export function DiscoverSearch({
                         <Play className="h-4 w-4 fill-white text-white" />
                       </div>
                       {item.duration && (
-                        <span className="absolute bottom-0.5 right-1 px-1 py-0.2 rounded bg-black/80 font-mono text-[9px] text-white">
+                        <span className="absolute bottom-0.5 right-1 px-1 py-0.2 rounded-none bg-black/80 font-mono text-[9px] text-white">
                           {item.duration}
                         </span>
                       )}
@@ -1233,10 +1392,10 @@ export function DiscoverSearch({
                 <div
                   key={item.id}
                   onClick={() => handlePlayVideo(item)}
-                  className="group relative flex flex-col rounded-2xl bg-card border border-border hover:border-primary/50 overflow-hidden shadow-xs hover:shadow-md transition-all cursor-pointer"
+                  className="group relative flex flex-col rounded-none bg-card border border-border hover:border-primary/50 overflow-hidden shadow-xs hover:shadow-md transition-all cursor-pointer"
                 >
                   {/* Thumbnail with duration badge & play button */}
-                  <div className="relative aspect-video w-full bg-black overflow-hidden">
+                  <div className="relative aspect-video w-full bg-black overflow-hidden rounded-none border-b border-border/40">
                     <img
                       src={item.thumbnail}
                       alt={item.title}
@@ -1249,7 +1408,7 @@ export function DiscoverSearch({
                       </div>
                     </div>
                     {item.duration && (
-                      <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/85 font-mono text-[10px] text-white font-medium">
+                      <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-none bg-black/85 font-mono text-[10px] text-white font-medium">
                         {item.duration}
                       </span>
                     )}
@@ -1309,6 +1468,74 @@ export function DiscoverSearch({
               ))}
             </div>
           </div>
+
+          {/* MONTHLY AUTO-CLEANING WATCH & LISTENING HISTORY */}
+          {watchHistory.length > 0 && (
+            <div className="p-4 rounded-none bg-card border border-border space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Film className="h-4 w-4 text-emerald-500" />
+                  <h3 className="text-sm font-bold text-foreground">
+                    Monthly Auto-Cleaning Watch History
+                  </h3>
+                  <span className="text-[10px] px-2 py-0.5 font-medium bg-muted text-muted-foreground border border-border">
+                    Auto-cleans after 30 days
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    clearWatchHistory();
+                    setWatchHistory([]);
+                  }}
+                  className="text-xs text-muted-foreground hover:text-destructive transition-colors font-semibold"
+                >
+                  Clear History
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                {watchHistory.slice(0, 8).map((hist) => (
+                  <div
+                    key={`hist-${hist.id}-${hist.watchedAt}`}
+                    onClick={() =>
+                      handlePlayVideo({
+                        id: hist.id,
+                        title: hist.title,
+                        channel: hist.channel,
+                        thumbnail: hist.thumbnail,
+                        duration: hist.duration,
+                      })
+                    }
+                    className="group flex flex-col p-2 bg-muted/40 hover:bg-muted border border-border/70 transition-all cursor-pointer rounded-none"
+                  >
+                    <div className="relative aspect-video w-full bg-black overflow-hidden rounded-none border border-border/40">
+                      <img
+                        src={hist.thumbnail}
+                        alt={hist.title}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Play className="h-4 w-4 fill-white text-white" />
+                      </div>
+                      {hist.duration && (
+                        <span className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded-none bg-black/85 font-mono text-[9px] text-white">
+                          {hist.duration}
+                        </span>
+                      )}
+                    </div>
+                    <strong className="block text-xs font-semibold text-foreground line-clamp-1 group-hover:text-primary transition-colors mt-1.5">
+                      {hist.title}
+                    </strong>
+                    <span className="text-[10px] text-muted-foreground block truncate">
+                      {hist.channel}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Direct Link Pasting */}
           <div className="p-4 rounded-2xl bg-muted border border-border">
             <span className="text-xs font-bold text-foreground block mb-1">

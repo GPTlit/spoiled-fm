@@ -8,6 +8,7 @@
 
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import type { Track } from "./player";
+import { getAppCoverLogo } from "./user-preferences";
 
 export interface NativeAudioTrack {
   id: string;
@@ -119,7 +120,7 @@ export function nativeTrackToPlayerTrack(nat: NativeAudioTrack): Track {
     duration: nat.duration,
     url: playUrl,
     contentUri: nat.contentUri,
-    pictureUrl: nat.albumArtUri ? Capacitor.convertFileSrc(nat.albumArtUri) : undefined,
+    pictureUrl: nat.albumArtUri ? Capacitor.convertFileSrc(nat.albumArtUri) : getAppCoverLogo(),
     hasEmbeddedPicture: Boolean(nat.albumArtUri),
     hue: Math.floor(Math.random() * 60) + 20,
     liked: false,

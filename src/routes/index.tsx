@@ -166,7 +166,13 @@ function Art({ track, className = "" }: { track?: Track | undefined; className?:
   const imgSrc = track?.pictureUrl || brandLogo;
   return (
     <div className={`art ${className}`}>
-      <img src={imgSrc} alt={track ? `${track.title} artwork` : "SPOILED"} />
+      <img
+        src={imgSrc}
+        alt={track ? `${track.title} artwork` : "SPOILED"}
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).src = brandLogo;
+        }}
+      />
     </div>
   );
 }
@@ -233,6 +239,86 @@ function MusicApp() {
   const [lyricDraft, setLyricDraft] = useState("");
   const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
   const scrubValRef = useRef<number | null>(null);
+  const [miniSwipeOffset, setMiniSwipeOffset] = useState(0);
+  const [coverSwipeOffset, setCoverSwipeOffset] = useState(0);
+  const [isExportingStem, setIsExportingStem] = useState(false);
+  const touchStartX = useRef<number | null>(null);
+  const touchCoverStartX = useRef<number | null>(null);
+
+  const handleMiniTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    touchStartX.current = clientX;
+  };
+
+  const handleMiniTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
+    if (touchStartX.current === null) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const diff = clientX - touchStartX.current;
+    setMiniSwipeOffset(diff);
+  };
+
+  const handleMiniTouchEnd = () => {
+    if (touchStartX.current === null) return;
+    const offset = miniSwipeOffset;
+    touchStartX.current = null;
+
+    if (Math.abs(offset) > 75) {
+      // Swiped off to the side: stop playback completely!
+      const target = offset > 0 ? 450 : -450;
+      setMiniSwipeOffset(target);
+      setTimeout(() => {
+        p.stopPlayback();
+        setMessage("Playback stopped");
+        setMiniSwipeOffset(0);
+        try {
+          if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+            navigator.vibrate?.([25]);
+          }
+        } catch {
+          // ignore
+        }
+      }, 180);
+    } else {
+      setMiniSwipeOffset(0);
+    }
+  };
+
+  const handleCoverTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    touchCoverStartX.current = clientX;
+  };
+
+  const handleCoverTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
+    if (touchCoverStartX.current === null) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const diff = clientX - touchCoverStartX.current;
+    setCoverSwipeOffset(diff);
+  };
+
+  const handleCoverTouchEnd = () => {
+    if (touchCoverStartX.current === null) return;
+    const offset = coverSwipeOffset;
+    touchCoverStartX.current = null;
+    if (Math.abs(offset) > 85) {
+      const target = offset > 0 ? 550 : -550;
+      setCoverSwipeOffset(target);
+      setTimeout(() => {
+        p.stopPlayback();
+        setMessage("Playback stopped");
+        setCoverSwipeOffset(0);
+        setScreen("home");
+        try {
+          if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+            navigator.vibrate?.([25]);
+          }
+        } catch {
+          // ignore
+        }
+      }, 180);
+    } else {
+      setCoverSwipeOffset(0);
+    }
+  };
 
   const commitSeek = (explicitTime?: number) => {
     const t = explicitTime ?? scrubValRef.current ?? scrubbingTime;
@@ -2136,9 +2222,23 @@ function MusicApp() {
                     <h3 className="text-base font-bold">10-Band Graphic Equalizer</h3>
                     <p className="text-xs text-muted-foreground">Web Audio BiquadFilter Chain</p>
                   </div>
-                  <span className="text-xs font-semibold px-2 py-1 rounded bg-secondary">
-                    {p.eqPreset}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">
+                      {p.eqPreset}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7 px-2.5"
+                      onClick={() => {
+                        p.resetEqToDefault();
+                        setMessage(`Equalizer reset to default for ${p.eqPreset}`);
+                      }}
+                      title="Reset current preset back to factory default gains"
+                    >
+                      Reset to Default
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="eq-presets-bar">
@@ -2177,6 +2277,146 @@ function MusicApp() {
                       </span>
                     </div>
                   ))}
+                </div>
+
+                {/* Session Song Save Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-border mt-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!p.current) {
+                          setMessage("Play a song first to save custom EQ.");
+                          return;
+                        }
+                        p.saveCurrentSongEq();
+                        setMessage(`EQ saved currently for "${p.current.title}" during this session.`);
+                      }}
+                      disabled={!p.current}
+                      title="Save custom adjustments currently for this song"
+                    >
+                      Save Currently for Current Song
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        p.resetEqToDefault();
+                        setMessage("Reverted to default settings.");
+                      }}
+                    >
+                      Go Back to Default
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Vocal Alone vs Beats Alone Stem Extraction */}
+                <div className="pt-4 border-t border-border mt-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                        Audio Stems & Vocal Isolator
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground">
+                        Isolate vocals alone or beats alone, and save as a new song.
+                      </p>
+                    </div>
+                    {p.stemMode !== "normal" && (
+                      <span className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">
+                        {p.stemMode}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        p.stemMode === "normal"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted border-border text-foreground hover:bg-accent"
+                      }`}
+                      onClick={() => p.setStemMode("normal")}
+                    >
+                      Full Audio (Normal)
+                    </button>
+                    <button
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        p.stemMode === "vocals-only"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted border-border text-foreground hover:bg-accent"
+                      }`}
+                      onClick={() => p.setStemMode("vocals-only")}
+                    >
+                      Vocals Alone (Mute Beats)
+                    </button>
+                    <button
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        p.stemMode === "beats-only"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-muted border-border text-foreground hover:bg-accent"
+                      }`}
+                      onClick={() => p.setStemMode("beats-only")}
+                    >
+                      Beats Alone (Mute Vocals)
+                    </button>
+                  </div>
+
+                  {p.current && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={isExportingStem}
+                        onClick={async () => {
+                          if (!p.current) return;
+                          setIsExportingStem(true);
+                          setMessage(`Extracting vocals for "${p.current.title}"…`);
+                          try {
+                            const newTrack = await p.exportStemTrack(p.current, "vocals-only");
+                            setMessage(`Saved new song: "${newTrack.title}"!`);
+                          } catch (err) {
+                            setMessage("Could not extract vocals from this track.");
+                          } finally {
+                            setIsExportingStem(false);
+                          }
+                        }}
+                      >
+                        {isExportingStem ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Mic className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+                        )}
+                        Save Vocals Alone as New Song
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={isExportingStem}
+                        onClick={async () => {
+                          if (!p.current) return;
+                          setIsExportingStem(true);
+                          setMessage(`Extracting beats for "${p.current.title}"…`);
+                          try {
+                            const newTrack = await p.exportStemTrack(p.current, "beats-only");
+                            setMessage(`Saved new song: "${newTrack.title}"!`);
+                          } catch (err) {
+                            setMessage("Could not extract beats from this track.");
+                          } finally {
+                            setIsExportingStem(false);
+                          }
+                        }}
+                      >
+                        {isExportingStem ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Disc3 className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+                        )}
+                        Save Beats Alone as New Song
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3187,7 +3427,21 @@ function MusicApp() {
                 </>
               ) : (
                 <>
-                  <div className="large-cover">
+                  <div
+                    className="large-cover cursor-grab active:cursor-grabbing select-none"
+                    style={{
+                      transform: `translateX(${coverSwipeOffset}px)`,
+                      opacity: coverSwipeOffset !== 0 ? Math.max(0.2, 1 - Math.abs(coverSwipeOffset) / 320) : 1,
+                      transition: coverSwipeOffset === 0 ? "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease" : "none",
+                    }}
+                    onTouchStart={handleCoverTouchStart}
+                    onTouchMove={handleCoverTouchMove}
+                    onTouchEnd={handleCoverTouchEnd}
+                    onMouseDown={handleCoverTouchStart}
+                    onMouseMove={handleCoverTouchMove}
+                    onMouseUp={handleCoverTouchEnd}
+                    title="Hold and swipe to the side to stop playing"
+                  >
                     <Art track={p.current} />
                   </div>
                   <div className="song-heading">
@@ -3394,42 +3648,59 @@ function MusicApp() {
       )}
 
       {p.current && !["now", "lyrics", "queue"].includes(screen) && (
-        <div className="mini-player">
-          <Button variant="ghost" className="mini-song" onClick={() => go("now")}>
-            <Art track={p.current} />
-            <span>
-              <strong>{p.current.title}</strong>
-              <small>{p.current.artist}</small>
-            </span>
-          </Button>
-          <Button variant="ghost" size="icon" title="Previous" onClick={p.prev}>
-            <SkipBack />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title={p.playing ? "Pause" : "Play"}
-            onClick={p.toggle}
-          >
-            {p.playing ? <Pause /> : <Play />}
-          </Button>
-          <Button variant="ghost" size="icon" title="Next" onClick={p.next}>
-            <SkipForward />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Open player"
-            onClick={() => go("now")}
-            className="mini-open"
-          >
-            <ChevronRight />
-          </Button>
+        <>
+          {/* Frosted blur shield underneath the playing song so scrolling text blurs instead of scrambling */}
+          <div className="mini-player-blur-shield" aria-hidden="true" />
           <div
-            className="mini-progress"
-            style={{ width: `${p.duration ? (p.time / p.duration) * 100 : 0}%` }}
-          />
-        </div>
+            className={`mini-player cursor-grab active:cursor-grabbing select-none ${miniSwipeOffset !== 0 ? "swiping" : ""}`}
+            style={{
+              transform: `translateX(calc(-50% + ${miniSwipeOffset}px))`,
+              opacity: miniSwipeOffset !== 0 ? Math.max(0.2, 1 - Math.abs(miniSwipeOffset) / 250) : 1,
+            }}
+            onTouchStart={handleMiniTouchStart}
+            onTouchMove={handleMiniTouchMove}
+            onTouchEnd={handleMiniTouchEnd}
+            onMouseDown={handleMiniTouchStart}
+            onMouseMove={handleMiniTouchMove}
+            onMouseUp={handleMiniTouchEnd}
+            title="Hold and swipe to the side to stop playback"
+          >
+            <Button variant="ghost" className="mini-song" onClick={() => go("now")}>
+              <Art track={p.current} />
+              <span>
+                <strong>{p.current.title}</strong>
+                <small>{p.current.artist}</small>
+              </span>
+            </Button>
+            <Button variant="ghost" size="icon" title="Previous" onClick={p.prev}>
+              <SkipBack />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              title={p.playing ? "Pause" : "Play"}
+              onClick={p.toggle}
+            >
+              {p.playing ? <Pause /> : <Play />}
+            </Button>
+            <Button variant="ghost" size="icon" title="Next" onClick={p.next}>
+              <SkipForward />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Open player"
+              onClick={() => go("now")}
+              className="mini-open"
+            >
+              <ChevronRight />
+            </Button>
+            <div
+              className="mini-progress"
+              style={{ width: `${p.duration ? (p.time / p.duration) * 100 : 0}%` }}
+            />
+          </div>
+        </>
       )}
 
       {/* Dedicated Top-Layer Song Options Action Modal (Always visible on top of all UI) */}
